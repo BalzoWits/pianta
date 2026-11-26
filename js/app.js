@@ -3,7 +3,7 @@ import * as G from './geom.js';
 import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js';
 import { View3D } from './view3d.js';
 import { CATALOG, CATEGORIES, newItem } from './furniture.js';
-import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor } from './materials.js';
+import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS } from './materials.js';
 import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js';
 import { skewAngle, rotateImage, detectWalls } from './detect.js';
 import * as MD from './models.js';
@@ -258,13 +258,14 @@ function setView(v) {
   updateWalkpad();
   renderTools(); renderPanel(); setHint();
 }
-const renderOpts = { bounces: 6, scale: 1, samples: 96, denoise: true };
+const renderOpts = { style: 'pt', bounces: 6, scale: 1, samples: 96, denoise: true };
 function updateWalkpad() { $('#walkpad').hidden = !(app.view !== '2d' && view.mode === 'walk'); }
 document.querySelectorAll('#viewSeg button').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
 view.onProgress = st => {
   const n = st.samples || 0;
   let t;
-  if (st.stage === 'building' || st.stage === 'compiling' || (!n && st.stage !== 'done')) t = 'Preparo il render…';
+  if (st.stage === 'instant') t = 'Pronto';
+  else if (st.stage === 'building' || st.stage === 'compiling' || (!n && st.stage !== 'done')) t = 'Preparo il render…';
   else if (st.stage === 'denoising') t = 'Tolgo il rumore…' + (st.progress != null ? ' ' + Math.round(st.progress * 100) + '%' : '');
   else if (st.stage === 'done') t = 'Pronto · ' + n + ' passaggi';
   else t = n + (st.max ? ' / ' + st.max : '') + (n === 1 ? ' passaggio' : ' passaggi');
@@ -443,14 +444,14 @@ fileFloor.addEventListener('change', async e => {
     const url = URL.createObjectURL(f);
     const img = await loadImage(url);
     URL.revokeObjectURL(url);
-    // quadrato al centro, al massimo 1024 px (la texture si ripete)
-    const side = Math.min(img.naturalWidth, img.naturalHeight), out = Math.min(1024, side);
-    const c = document.createElement('canvas'); c.width = c.height = out;
-    c.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, out, out);
+    // intera (anche rettangolare: listoni, piastrelle 30×60), al massimo 1024 px di lato
+    const k = Math.min(1, 1024 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
     const id = G.newId('t');
-    const v = await promptText('Quanto misura nella realtà il lato dell’immagine?', '60', 'Usa', 'cm, es. 60 per una piastrella 60×60');
+    const v = await promptText('Quanto è larga nella realtà l’immagine (lato orizzontale)?', '60', 'Usa', 'cm, es. 60 per una piastrella 60×60');
     const size = parseLen(v) || 60;
-    app.doc.textures[id] = { name: f.name.replace(/\.[^.]+$/, '').slice(0, 24), src: c.toDataURL('image/jpeg', 0.85), size };
+    app.doc.textures[id] = { name: f.name.replace(/\.[^.]+$/, '').slice(0, 24), src: c.toDataURL('image/jpeg', 0.85), size, layout: 'dritta', rot: 0 };
     setCustomFloors(app.doc.textures);
     if (floorImageCb) floorImageCb('img:' + id);
   } catch (err) { toast('Immagine non leggibile: ' + err.message); }
@@ -740,7 +741,18 @@ function panelRoom(r) {
   panel.append(floorPicker(r.floor || 'parquet', k => { r.floor = k; commit('Pavimento'); }));
   if (isCustomFloor(r.floor)) {
     const t = app.doc.textures[r.floor.slice(4)];
-    if (t) panel.append(numField('Lato dell’immagine nella realtà', t.size, setVal(v => { t.size = v; setCustomFloors(app.doc.textures); }, 'Scala pavimento'), { min: 5, max: 1000 }));
+    if (t) {
+      panel.append(numField('Larghezza dell’immagine', t.size, setVal(v => { t.size = v; setCustomFloors(app.doc.textures); }, 'Scala pavimento'), { min: 5, max: 1000 }));
+      const lay = h('select', {}, ...Object.entries(LAYOUTS).map(([k, n]) => h('option', { value: k }, n)));
+      lay.value = t.layout || 'dritta';
+      lay.addEventListener('change', () => { t.layout = lay.value; setCustomFloors(app.doc.textures); commit('Posa pavimento'); });
+      panel.append(h('label', { class: 'field' }, h('span', {}, 'Posa'), lay));
+      const rot = h('select', {}, ...[0, 45, 90, 135].map(a => h('option', { value: a }, a + '°')));
+      rot.value = String(t.rot || 0);
+      rot.addEventListener('change', () => { t.rot = +rot.value; setCustomFloors(app.doc.textures); commit('Rotazione pavimento'); });
+      panel.append(h('label', { class: 'field' }, h('span', {}, 'Rotazione'), rot));
+      panel.append(h('p', {}, 'Posa e misure valgono per questa immagine in tutte le stanze dove la usi.'));
+    }
   }
   panel.append(h('h3', {}, 'Pareti'));
   panel.append(swatches(WALL_COLORS, r.wallColor || '#f4f1ea', setVal(c => { r.wallColor = c; }, 'Colore pareti')));
@@ -777,25 +789,41 @@ function panel3D() {
 
 function panelRender() {
   panel.append(h('h2', {}, 'Render'));
-  panel.append(h('p', {}, 'L’immagine si pulisce a ogni passaggio; arrivata al numero di passaggi della qualità scelta, un filtro toglie il rumore rimasto. Puoi ancora girare la vista o camminare: il calcolo riparte.'));
+  const R = renderOpts;
+  const restart = () => view.startTrace(R);
+  // stile: fotorealistico (path tracing) oppure istantanei
+  const styles = [['pt', 'Fotorealistico'], ['raster', 'Veloce'], ['sketch', 'Schizzo']];
+  panel.append(h('div', { class: 'row' }, ...styles.map(([k, n]) => btn(n, () => { R.style = k; restart(); renderPanel(); }, R.style === k ? 'on' : ''))));
+  panel.append(h('p', {}, R.style === 'pt' ? 'Luce vera, riflessi e ombre morbide: l’immagine si pulisce a ogni passaggio e alla fine un filtro toglie il rumore. Puoi ancora girare la vista: il calcolo riparte.'
+    : R.style === 'raster' ? 'Immagine immediata con ombre del sole e luce d’ambiente: meno realistica, ma pronta subito anche mentre ti muovi.'
+      : 'Disegno a contorni su modello bianco, pronto subito: utile per presentare gli spazi.'));
   const L = view.light;
-  panel.append(h('div', { class: 'row' }, btn('Giorno', () => { view.setLight({ mode: 'day' }); renderPanel(); }, L.mode === 'day' ? 'on' : ''), btn('Sera', () => { view.setLight({ mode: 'night' }); renderPanel(); }, L.mode !== 'day' ? 'on' : '')));
-  if (L.mode === 'day') {
-    panel.append(rangeField('Direzione del sole', L.sunAz, 0, 360, 5, (v, fin) => { L.sunAz = v; if (fin) view.setLight({}); }, v => v + '°'));
-    panel.append(rangeField('Altezza del sole', L.sunEl, 5, 85, 1, (v, fin) => { L.sunEl = v; if (fin) view.setLight({}); }, v => v + '°'));
-    panel.append(checkField('Lampade accese', L.lampsDay, v => view.setLight({ lampsDay: v })));
-  } else panel.append(rangeField('Lampade', L.lamps, 0.2, 3, 0.1, (v, fin) => { L.lamps = v; if (fin) view.setLight({}); }, v => v.toFixed(1).replace('.', ',') + '×'));
-  panel.append(rangeField('Esposizione', view.renderExposure, 0.3, 4, 0.05, v => { view.renderExposure = v; if (!view.useGpu) { view.renderer.toneMappingExposure = v; view._resetTrace(); } }, v => v.toFixed(2).replace('.', ',')));
-  const Q = { bozza: [32, 4], buona: [96, 6], alta: [300, 8], continua: [0, 8] };
-  const q = h('select', {}, h('option', { value: 'bozza' }, 'Bozza'), h('option', { value: 'buona' }, 'Buona'), h('option', { value: 'alta' }, 'Alta'), h('option', { value: 'continua' }, 'Senza fine'));
-  q.value = Object.keys(Q).find(k => Q[k][0] === renderOpts.samples) || 'buona';
-  q.addEventListener('change', () => { [renderOpts.samples, renderOpts.bounces] = Q[q.value]; view.startTrace(renderOpts); });
-  panel.append(h('label', { class: 'field' }, h('span', {}, 'Qualità'), q));
-  if (view.useGpu !== false) panel.append(checkField('Togli il rumore alla fine', renderOpts.denoise, v => { renderOpts.denoise = v; view.startTrace(renderOpts); }));
-  const rs = h('select', {}, h('option', { value: '0.5' }, '50%'), h('option', { value: '0.75' }, '75%'), h('option', { value: '1' }, '100%'));
-  rs.value = String(renderOpts.scale);
-  rs.addEventListener('change', () => { renderOpts.scale = +rs.value; view.startTrace(renderOpts); });
-  panel.append(h('label', { class: 'field' }, h('span', {}, 'Risoluzione'), rs));
+  if (R.style !== 'sketch') {
+    panel.append(h('h3', {}, 'Luce'));
+    panel.append(h('div', { class: 'row' }, btn('Giorno', () => { view.setLight({ mode: 'day' }); renderPanel(); }, L.mode === 'day' ? 'on' : ''), btn('Sera', () => { view.setLight({ mode: 'night' }); renderPanel(); }, L.mode !== 'day' ? 'on' : '')));
+    if (L.mode === 'day') {
+      panel.append(rangeField('Direzione del sole', L.sunAz, 0, 360, 5, (v, fin) => { L.sunAz = v; if (fin || R.style !== 'pt') view.setLight({}); }, v => v + '°'));
+      panel.append(rangeField('Altezza del sole', L.sunEl, 5, 85, 1, (v, fin) => { L.sunEl = v; if (fin || R.style !== 'pt') view.setLight({}); }, v => v + '°'));
+      if (R.style === 'pt') panel.append(checkField('Lampade accese', L.lampsDay, v => view.setLight({ lampsDay: v })));
+    } else panel.append(rangeField('Lampade', L.lamps, 0.2, 3, 0.1, (v, fin) => { L.lamps = v; if (fin || R.style !== 'pt') view.setLight({}); }, v => v.toFixed(1).replace('.', ',') + '×'));
+    panel.append(rangeField('Esposizione', R.style === 'pt' ? view.renderExposure : view.renderer.toneMappingExposure, 0.3, 4, 0.05, v => {
+      if (R.style === 'pt') { view.renderExposure = v; if (!view.useGpu) { view.renderer.toneMappingExposure = v; view._resetTrace(); } } else view.renderer.toneMappingExposure = v;
+    }, v => v.toFixed(2).replace('.', ',')));
+  }
+  if (R.style === 'pt') {
+    panel.append(h('h3', {}, 'Velocità e qualità'));
+    const P = { rapida: [16, 3, 0.5], bozza: [32, 4, 0.75], buona: [96, 6, 1], alta: [300, 8, 1], continua: [0, 8, 1] };
+    const names = { rapida: 'Rapida', bozza: 'Bozza', buona: 'Buona', alta: 'Alta', continua: 'Senza fine' };
+    panel.append(h('div', { class: 'row' }, ...Object.keys(P).map(k => btn(names[k], () => { [R.samples, R.bounces, R.scale] = P[k]; restart(); renderPanel(); }, P[k][0] === R.samples && P[k][1] === R.bounces && P[k][2] === R.scale ? 'on' : ''))));
+    panel.append(numField('Passaggi', R.samples, v => { R.samples = Math.round(v); restart(); renderPanel(); }, { unit: '', min: 0, max: 5000 }));
+    panel.append(rangeField('Rimbalzi della luce', R.bounces, 1, 12, 1, (v, fin) => { if (fin) { R.bounces = v; restart(); } }, v => v));
+    const rs = h('select', {}, ...[['0.25', '25%'], ['0.5', '50%'], ['0.75', '75%'], ['1', '100%']].map(([v, n]) => h('option', { value: v }, n)));
+    rs.value = String(R.scale);
+    rs.addEventListener('change', () => { R.scale = +rs.value; restart(); });
+    panel.append(h('label', { class: 'field' }, h('span', {}, 'Risoluzione'), rs));
+    if (view.gpuOk !== false) panel.append(checkField('Togli il rumore alla fine', R.denoise, v => { R.denoise = v; restart(); }));
+    panel.append(h('p', {}, 'Più veloce: meno passaggi, meno rimbalzi (2–3 bastano per una bozza), risoluzione più bassa. «Passaggi» a 0 = continua finché non cambi vista.'));
+  }
   panel.append(h('div', { class: 'row' }, btn('Cammina', () => { view.setMode('walk'); updateWalkpad(); renderTools(); }), btn('Orbita', () => { view.setMode('orbit'); updateWalkpad(); renderTools(); })));
 }
 

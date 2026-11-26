@@ -85,7 +85,7 @@ export class View3D {
     this.needsBuild = false;
     const doc = this.app.doc;
     if (this.houseGroup) { this.scene.remove(this.houseGroup); disposeGroup(this.houseGroup); }
-    const inside = this.mode === 'walk' || (this.tracing && !this.useGpu);
+    const inside = this.mode === 'walk' || (this.tracing && !this.useGpu && this.camera.position.y * 100 < doc.settings.wallHeight);
     const { group, bounds } = buildHouse(doc, {
       ceilings: inside,
       models: this.app.modelGeos(),
@@ -95,6 +95,7 @@ export class View3D {
     this.scene.add(group);
     this.bounds = bounds;
     this._applyLights();
+    if (this.renderMode === 'sketch') this._toSketch(group);
     this._highlight();
     if (!this._framed && !bounds.isEmpty()) { this.frame(); this._framed = true; }
     if (this.tracing) this._resetTrace(true);
@@ -311,8 +312,39 @@ export class View3D {
   }
 
   // ---------- render fotorealistico ----------
+  /** Stile «schizzo»: modello bianco con i contorni. */
+  _toSketch(group) {
+    const white = new THREE.MeshLambertMaterial({ color: 0xf6f5f2, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x2a2e35 });
+    const meshes = [];
+    group.traverse(o => { if (o.isMesh) meshes.push(o); });
+    for (const m of meshes) {
+      if (m.material === GLASS) { m.visible = false; continue; }
+      m.material = white;
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 25), lineMat);
+      edges.raycast = () => {};
+      m.add(edges);
+    }
+    this.scene.background = new THREE.Color(0xffffff);
+    this.hemi.intensity = 1.6; this.sun.intensity = 0.8;
+    this.ground.material.color.set(0xffffff);
+  }
   async startTrace(opts = {}) {
     this.traceOpts = { bounces: 6, scale: 1, ...opts };
+    // stili istantanei: niente path tracing
+    if (this.traceOpts.style && this.traceOpts.style !== 'pt') {
+      if (this.useGpu) { this.gpu.stop(); this.useGpu = false; this.renderer.domElement.style.visibility = ''; }
+      if (this._savedEnv) { this.scene.environment = this._savedEnv.env; this._savedEnv = null; }
+      this.hemi.visible = true;
+      this.tracing = false;
+      this.renderMode = this.traceOpts.style;
+      this.sun.shadow.mapSize.set(4096, 4096);
+      if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
+      this.rebuild();
+      if (this.onProgress) this.onProgress({ stage: 'instant' });
+      return;
+    }
+    if (this.renderMode) { this.renderMode = null; this.ground.material.color.set(0xcfd3c4); }
     this.tracing = true;
     if (this.gpuOk === undefined) {
       const { webgpuAvailable } = await import('./render-gpu.js');
@@ -379,6 +411,7 @@ export class View3D {
     this.pt.setScene(this.scene, this.camera);
   }
   stopTrace() {
+    if (this.renderMode) { this.renderMode = null; this.ground.material.color.set(0xcfd3c4); this.rebuild(); }
     if (!this.tracing) return;
     this.tracing = false;
     if (this.useGpu) { this.gpu.stop(); this.useGpu = false; this.renderer.domElement.style.visibility = ''; }

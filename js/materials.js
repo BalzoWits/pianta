@@ -22,26 +22,45 @@ export const ITEM_COLORS = ['#f2efe9', '#d8d2c7', '#a89f91', '#6b6259', '#3b3733
 const custom = new Map(); // id -> { tex, size, tint, src }
 let onCustomReady = null;
 export function onTextureLoaded(fn) { onCustomReady = fn; }
-/** Allinea le texture dell'utente con quelle del documento. */
+/** Allinea le texture dell'utente con quelle del documento (posa: dritta o sfalsata di 1/2, 1/3, 1/4). */
+export const LAYOUTS = { dritta: 'Dritta', '1/2': 'Sfalsata di 1/2', '1/3': 'Sfalsata di 1/3', '1/4': 'Sfalsata di 1/4' };
 export function setCustomFloors(textures) {
   for (const [id, t] of Object.entries(textures || {})) {
-    const cur = custom.get(id);
-    if (cur && cur.src === t.src) { if (cur.size !== t.size) { cur.size = t.size; matCache.delete('floor:img:' + id); } continue; }
+    const layout = t.layout || 'dritta';
+    const key = t.src + '|' + layout;
+    let e = custom.get(id);
+    const w = t.size || 60, rot = t.rot || 0;
+    if (e && e.key === key) {
+      if (e.w !== w || e.rot !== rot) { e.w = w; e.rot = rot; e.hTot = w * e.aspect * e.rows; matCache.delete('floor:img:' + id); if (onCustomReady) onCustomReady(); }
+      continue;
+    }
     const tex = new THREE.Texture();
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
-    const e = { tex, size: t.size || 60, tint: '#eeeeee', src: t.src };
+    e = { tex, key, src: t.src, w, rot, aspect: 1, rows: 1, hTot: w, tint: '#eeeeee' };
     custom.set(id, e);
     matCache.delete('floor:img:' + id);
     const img = new Image();
     img.onload = () => {
-      tex.image = img; tex.needsUpdate = true;
-      const c = document.createElement('canvas'); c.width = c.height = 1;
-      const x = c.getContext('2d'); x.drawImage(img, 0, 0, 1, 1);
-      const [r, g, b] = x.getImageData(0, 0, 1, 1).data;
+      const rows = { dritta: 1, '1/2': 2, '1/3': 3, '1/4': 4 }[layout] || 1;
+      const W = Math.min(1024, img.naturalWidth), Hh = Math.round(W * img.naturalHeight / img.naturalWidth);
+      // si compone il motivo che si ripete: una riga per ogni spostamento della posa
+      const c = document.createElement('canvas'); c.width = W; c.height = Hh * rows;
+      const x = c.getContext('2d');
+      for (let r = 0; r < rows; r++) {
+        const off = rows > 1 ? Math.round(r * W / rows) : 0;
+        x.drawImage(img, off, r * Hh, W, Hh);
+        if (off) x.drawImage(img, off - W, r * Hh, W, Hh);
+      }
+      tex.image = c; tex.needsUpdate = true;
+      e.aspect = Hh / W; e.rows = rows; e.hTot = e.w * e.aspect * rows;
+      matCache.delete('floor:img:' + id);
+      const t1 = document.createElement('canvas'); t1.width = t1.height = 1;
+      const x1 = t1.getContext('2d'); x1.drawImage(img, 0, 0, 1, 1);
+      const [r0, g0, b0] = x1.getImageData(0, 0, 1, 1).data;
       // tinta chiara per la pianta 2D
-      e.tint = `rgb(${Math.round(r + (255 - r) * 0.55)},${Math.round(g + (255 - g) * 0.55)},${Math.round(b + (255 - b) * 0.55)})`;
+      e.tint = `rgb(${Math.round(r0 + (255 - r0) * 0.55)},${Math.round(g0 + (255 - g0) * 0.55)},${Math.round(b0 + (255 - b0) * 0.55)})`;
       if (onCustomReady) onCustomReady();
     };
     img.src = t.src;
@@ -184,7 +203,7 @@ export function floorMaterial(key) {
   if (isCustomFloor(key) && custom.has(key.slice(4))) {
     const e = custom.get(key.slice(4));
     const m = new THREE.MeshStandardMaterial({ map: e.tex, roughness: 0.6 });
-    m.userData.texSize = e.size;
+    m.userData.texSize = e.w; m.userData.texH = e.hTot; m.userData.texRot = e.rot;
     matCache.set(k, m);
     return m;
   }

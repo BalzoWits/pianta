@@ -91,7 +91,9 @@ export class GpuTracer {
     const day = light.mode === 'day';
     if (this.scene) this.scene.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
     const scene = new THREE.Scene();
-    const { group, bounds } = buildHouse(doc, { ceilings: true, models: this.view.app.modelGeos() });
+    // soffitti solo se la camera e' dentro casa (da fuori coprirebbero tutto)
+    const inside = this.view.camera.position.y * 100 < doc.settings.wallHeight;
+    const { group, bounds } = buildHouse(doc, { ceilings: inside, models: this.view.app.modelGeos() });
     const glass = [];
     group.traverse(o => { if (o.isMesh && o.material === GLASS) glass.push(o); });
     for (const g of glass) g.parent.remove(g);

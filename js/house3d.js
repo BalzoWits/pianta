@@ -122,7 +122,7 @@ export function buildHouse(doc, opts = {}) {
     const fm = floorMaterial(key);
     const floor = prism(r.poly, -4, 0, () => 1, 0);
     if (floor) {
-      uvPlanar(floor, fm.userData.texSize);
+      uvPlanar(floor, fm.userData);
       const m = new THREE.Mesh(floor, [fm, solid('#bbb')]);
       m.receiveShadow = true;
       m.userData.room = r.label ? r.label.id : null;
@@ -144,10 +144,15 @@ export function buildHouse(doc, opts = {}) {
   return { group, bounds, rooms };
 }
 
-function uvPlanar(geo, sizeCm) {
+function uvPlanar(geo, ud) {
   const p = geo.getAttribute('position');
   const uv = new Float32Array(p.count * 2);
-  for (let i = 0; i < p.count; i++) { uv[i * 2] = p.getX(i) / (sizeCm * M); uv[i * 2 + 1] = p.getZ(i) / (sizeCm * M); }
+  const W = (ud.texSize || 100) * M, H = (ud.texH || ud.texSize || 100) * M;
+  const a = (ud.texRot || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    uv[i * 2] = (x * ca + z * sa) / W; uv[i * 2 + 1] = (-x * sa + z * ca) / H;
+  }
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
 }
 
