@@ -1,0 +1,367 @@
+// Catalogo dei mobili parametrici: ogni voce sa costruirsi in 3D (gruppo three.js in metri, origine al
+// centro dell'ingombro a terra, fronte verso +z) e disegnarsi in pianta (coordinate locali in cm, fronte verso +y).
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { solid, GLASS, MIRROR, CHROME, CERAMIC } from './materials.js';
+
+const M = 0.01; // cm -> m
+
+function box(g, w, h, d, x, y, z, mat, r = 0) {
+  const geo = r > 0 ? new RoundedBoxGeometry(w * M, h * M, d * M, 3, Math.min(r, w / 2 - 0.1, h / 2 - 0.1, d / 2 - 0.1) * M) : new THREE.BoxGeometry(w * M, h * M, d * M);
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x * M, (y + h / 2) * M, z * M);
+  g.add(m);
+  return m;
+}
+function cyl(g, r, h, x, y, z, mat, r2 = r, seg = 32) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r * M, r2 * M, h * M, seg), mat);
+  m.position.set(x * M, (y + h / 2) * M, z * M);
+  g.add(m);
+  return m;
+}
+function sphere(g, r, x, y, z, mat, sy = 1) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r * M, 32, 16), mat);
+  m.position.set(x * M, y * M, z * M);
+  m.scale.y = sy;
+  g.add(m);
+  return m;
+}
+const legs4 = (g, w, d, h, inset, s, mat, round = false) => {
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const x = sx * (w / 2 - inset), z = sz * (d / 2 - inset);
+    if (round) cyl(g, s / 2, h, x, 0, z, mat, s / 2, 12); else box(g, s, h, s, x, 0, z, mat);
+  }
+};
+const dark = c => { const k = new THREE.Color(c); k.multiplyScalar(0.6); return '#' + k.getHexString(); };
+const WOOD_DARK = '#4a3a2c', METAL = '#2b2b2b';
+
+// ---------- disegno 2D ----------
+// ctx gia' trasformato: origine al centro, unita' in cm, fronte verso +y. s = cm per pixel (spessore linee)
+function rect(ctx, x, y, w, h, fill) { ctx.beginPath(); ctx.rect(x, y, w, h); if (fill) { ctx.fillStyle = fill; ctx.fill(); } ctx.stroke(); }
+function rrect(ctx, x, y, w, h, r, fill) { ctx.beginPath(); ctx.roundRect(x, y, w, h, Math.min(r, w / 2, h / 2)); if (fill) { ctx.fillStyle = fill; ctx.fill(); } ctx.stroke(); }
+function circ(ctx, x, y, r, fill) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); if (fill) { ctx.fillStyle = fill; ctx.fill(); } ctx.stroke(); }
+function ell(ctx, x, y, rx, ry, fill) { ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); if (fill) { ctx.fillStyle = fill; ctx.fill(); } ctx.stroke(); }
+const box2d = (ctx, it, fill) => rect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, fill);
+
+// ---------- catalogo ----------
+export const CATALOG = {
+  // Soggiorno
+  divano3: {
+    name: 'Divano 3 posti', cat: 'Soggiorno', w: 220, d: 92, h: 82, color: '#8d8a84',
+    build(g, it) {
+      const f = solid(it.color, { rough: 0.95 }), a = it.w, d = it.d;
+      const arm = Math.min(18, a * 0.1), seats = Math.max(1, Math.round((a - 2 * arm) / 65));
+      box(g, a, 18, d, 0, 4, 0, f, 3);
+      box(g, a - 2 * arm, 20, 22, 0, 18, -d / 2 + 11, f, 6);
+      box(g, a - 2 * arm, it.h - 18, 20, 0, 18, -d / 2 + 10, f, 8);
+      const sw = (a - 2 * arm) / seats;
+      for (let i = 0; i < seats; i++) box(g, sw - 1, 16, d - 22, -a / 2 + arm + sw * (i + 0.5), 20, 11, f, 7);
+      for (const s of [-1, 1]) box(g, arm, 62, d, s * (a / 2 - arm / 2), 4, 0, f, 7);
+      legs4(g, a, d, 4, 8, 4, solid(METAL), true);
+    },
+    draw(ctx, it, s) {
+      const arm = Math.min(18, it.w * 0.1), seats = Math.max(1, Math.round((it.w - 2 * arm) / 65));
+      rrect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, 6, '#fff');
+      rect(ctx, -it.w / 2 + arm, -it.d / 2, it.w - 2 * arm, 20);
+      const sw = (it.w - 2 * arm) / seats;
+      for (let i = 1; i < seats; i++) { ctx.beginPath(); ctx.moveTo(-it.w / 2 + arm + sw * i, -it.d / 2 + 20); ctx.lineTo(-it.w / 2 + arm + sw * i, it.d / 2); ctx.stroke(); }
+      ctx.beginPath(); ctx.moveTo(-it.w / 2 + arm, -it.d / 2); ctx.lineTo(-it.w / 2 + arm, it.d / 2); ctx.moveTo(it.w / 2 - arm, -it.d / 2); ctx.lineTo(it.w / 2 - arm, it.d / 2); ctx.stroke();
+    },
+  },
+  divano2: { like: 'divano3', name: 'Divano 2 posti', w: 160 },
+  poltrona: { like: 'divano3', name: 'Poltrona', w: 90, d: 88, color: '#6b7f8c' },
+  tavolino: {
+    name: 'Tavolino', cat: 'Soggiorno', w: 110, d: 60, h: 40, color: '#c9a274',
+    build(g, it) { const m = solid(it.color, { rough: 0.5 }); box(g, it.w, 4, it.d, 0, it.h - 4, 0, m, 1); box(g, it.w - 8, 2, it.d - 8, 0, 8, 0, m); legs4(g, it.w, it.d, it.h - 4, 4, 4, solid(METAL)); },
+    draw(ctx, it) { rrect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, 3, '#fff'); },
+  },
+  mobileTV: {
+    name: 'Mobile TV', cat: 'Soggiorno', w: 180, d: 45, h: 50, color: '#f2efe9',
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.6 });
+      box(g, it.w, it.h - 10, it.d, 0, 10, 0, m, 1);
+      legs4(g, it.w, it.d, 10, 6, 3, solid(METAL));
+      for (let i = 1; i < 3; i++) box(g, 0.6, it.h - 16, 0.5, -it.w / 2 + it.w * i / 3, 13, it.d / 2, solid(dark(it.color)));
+      const tvw = Math.min(140, it.w - 20);
+      box(g, tvw, tvw * 0.56, 3, 0, it.h + 8, -it.d / 2 + 12, solid('#111', { rough: 0.2 }));
+      box(g, 24, 8, 16, 0, it.h, -it.d / 2 + 12, solid('#222'));
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); const tvw = Math.min(140, it.w - 20); rect(ctx, -tvw / 2, -it.d / 2 + 9, tvw, 4, '#333'); },
+  },
+  libreria: {
+    name: 'Libreria', cat: 'Soggiorno', w: 100, d: 35, h: 200, color: '#f2efe9',
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.6 }), t = 2;
+      for (const s of [-1, 1]) box(g, t, it.h, it.d, s * (it.w / 2 - t / 2), 0, 0, m);
+      box(g, it.w, t, it.d, 0, it.h - t, 0, m); box(g, it.w - 2 * t, 1, it.d, 0, 0, -0.5, m);
+      box(g, it.w, it.h, 1, 0, 0, -it.d / 2 + 0.5, m);
+      const shelves = Math.max(2, Math.round(it.h / 38));
+      const cols = ['#7d4a3a', '#2f4858', '#d9a441', '#5f7f8c', '#b5473a', '#ddd6c8', '#3b3733'];
+      let k = 0;
+      for (let i = 1; i <= shelves; i++) {
+        const y = (it.h - t) * i / (shelves + 0) - 0;
+        if (i < shelves) box(g, it.w - 2 * t, t, it.d - 1, 0, y - t, 0.5, m);
+        const y0 = (it.h - t) * (i - 1) / shelves + (i === 1 ? 1 : 0);
+        let x = -it.w / 2 + t + 2;
+        while (x < it.w / 2 - 12 && (i + k) % 4 !== 3) {
+          const bw = 2 + ((k * 7) % 4), bh = 20 + ((k * 13) % 9);
+          box(g, bw, bh, it.d * 0.7, x + bw / 2, y0, -it.d * 0.1, solid(cols[k % cols.length], { rough: 0.7 }));
+          x += bw + 0.3; k++;
+        }
+        k++;
+      }
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); ctx.beginPath(); ctx.moveTo(-it.w / 2, -it.d / 2 + 2); ctx.lineTo(it.w / 2, -it.d / 2 + 2); ctx.stroke(); },
+  },
+  tappeto: {
+    name: 'Tappeto', cat: 'Soggiorno', w: 200, d: 140, h: 1, color: '#b9b0a2',
+    build(g, it) { box(g, it.w, 1, it.d, 0, 0, 0, solid(it.color, { rough: 1 })); box(g, it.w - 20, 1.05, it.d - 20, 0, 0, 0, solid(dark(it.color), { rough: 1 })); },
+    draw(ctx, it) { ctx.setLineDash([6, 4]); box2d(ctx, it); ctx.setLineDash([]); },
+  },
+  // Pranzo
+  tavolo: {
+    name: 'Tavolo', cat: 'Pranzo', w: 160, d: 90, h: 75, color: '#c9a274',
+    build(g, it) { const m = solid(it.color, { rough: 0.45 }); box(g, it.w, 4, it.d, 0, it.h - 4, 0, m, 1); legs4(g, it.w, it.d, it.h - 4, 6, 6, m); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); },
+  },
+  tavoloTondo: {
+    name: 'Tavolo rotondo', cat: 'Pranzo', w: 110, d: 110, h: 75, color: '#f2efe9', round: true,
+    build(g, it) { const m = solid(it.color, { rough: 0.4 }); const r = it.w / 2; const top = cyl(g, r, 4, 0, it.h - 4, 0, m, r, 48); top.scale.z = it.d / it.w; cyl(g, 4, it.h - 4, 0, 0, 0, solid(METAL)); cyl(g, 25, 2, 0, 0, 0, solid(METAL)); },
+    draw(ctx, it) { ell(ctx, 0, 0, it.w / 2, it.d / 2, '#fff'); },
+  },
+  sedia: {
+    name: 'Sedia', cat: 'Pranzo', w: 45, d: 50, h: 88, color: '#3b3733',
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.6 }); const sh = 45;
+      box(g, it.w, 4, it.d, 0, sh - 4, 0, m, 1);
+      legs4(g, it.w, it.d, sh - 4, 2.5, 3, m);
+      box(g, it.w, it.h - sh, 3, 0, sh, -it.d / 2 + 1.5, m, 1);
+    },
+    draw(ctx, it) { rrect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, 4, '#fff'); rect(ctx, -it.w / 2, -it.d / 2, it.w, 4); },
+  },
+  // Cucina
+  baseCucina: {
+    name: 'Base cucina', cat: 'Cucina', w: 60, d: 60, h: 90, color: '#f2efe9', color2: '#3b3733',
+    build(g, it) {
+      const f = solid(it.color, { rough: 0.4 }), top = solid(it.color2, { rough: 0.3 });
+      box(g, it.w, 10, it.d - 6, 0, 0, -3, solid('#222'));
+      box(g, it.w - 0.4, it.h - 14, it.d - 4, 0, 10, -2, f);
+      box(g, it.w, 4, it.d, 0, it.h - 4, 0, top);
+      const doors = Math.max(1, Math.round(it.w / 60));
+      for (let i = 1; i < doors; i++) box(g, 0.4, it.h - 14, 0.4, -it.w / 2 + it.w * i / doors, 10, it.d / 2 - 2, solid(dark(it.color)));
+      box(g, it.w - 4, 1.2, 1.5, 0, it.h - 9, it.d / 2 - 1.5, CHROME);
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); ctx.beginPath(); ctx.moveTo(-it.w / 2, it.d / 2 - 3); ctx.lineTo(it.w / 2, it.d / 2 - 3); ctx.stroke(); },
+  },
+  lavello: {
+    like: 'baseCucina', name: 'Base con lavello', w: 90,
+    extra(g, it) {
+      const sw = Math.min(50, it.w - 20);
+      box(g, sw, 0.5, 40, 0, it.h + 0.05, 0, CHROME);
+      box(g, sw - 4, 0.6, 36, 0, it.h + 0.1, 0, solid('#9a9a9a', { metal: 1, rough: 0.3 }));
+      cyl(g, 1.5, 25, 0, it.h, -it.d / 2 + 8, CHROME);
+      box(g, 3, 3, 18, 0, it.h + 22, -it.d / 2 + 16, CHROME);
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); const sw = Math.min(50, it.w - 20); rrect(ctx, -sw / 2, -20, sw, 40, 5); circ(ctx, 0, 0, 2.5); },
+  },
+  fornelli: {
+    like: 'baseCucina', name: 'Base con piano cottura', w: 60,
+    extra(g, it) {
+      box(g, Math.min(58, it.w - 2), 0.6, 50, 0, it.h, 0, solid('#111', { rough: 0.1 }));
+      for (const [x, z] of [[-14, -12], [14, -12], [-14, 12], [14, 12]]) cyl(g, 8, 0.3, x, it.h + 0.6, z, solid('#444', { rough: 0.5 }), 8, 24);
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); for (const [x, y] of [[-14, -12], [14, -12], [-14, 12], [14, 12]]) circ(ctx, x, y, 8); },
+  },
+  pensile: {
+    name: 'Pensile', cat: 'Cucina', w: 60, d: 35, h: 70, elev: 145, color: '#f2efe9',
+    build(g, it) { box(g, it.w - 0.4, it.h, it.d, 0, 0, 0, solid(it.color, { rough: 0.4 })); box(g, it.w - 4, 1.2, 1.5, 0, 3, it.d / 2 + 0.7, CHROME); },
+    draw(ctx, it) { ctx.setLineDash([4, 3]); box2d(ctx, it); ctx.beginPath(); ctx.moveTo(-it.w / 2, -it.d / 2); ctx.lineTo(it.w / 2, it.d / 2); ctx.stroke(); ctx.setLineDash([]); },
+  },
+  frigo: {
+    name: 'Frigorifero', cat: 'Cucina', w: 60, d: 65, h: 200, color: '#d8d8d8',
+    build(g, it) { box(g, it.w, it.h, it.d, 0, 0, 0, solid(it.color, { rough: 0.25, metal: 0.3 }), 2); box(g, it.w, 0.6, 0.4, 0, it.h * 0.62, it.d / 2, solid('#555')); box(g, 2, 40, 3, it.w / 2 - 6, it.h * 0.62 - 50, it.d / 2 + 1.5, CHROME); box(g, 2, 30, 3, it.w / 2 - 6, it.h * 0.62 + 10, it.d / 2 + 1.5, CHROME); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); ctx.beginPath(); ctx.moveTo(-it.w / 2, -it.d / 2); ctx.lineTo(it.w / 2, it.d / 2); ctx.moveTo(it.w / 2, -it.d / 2); ctx.lineTo(-it.w / 2, it.d / 2); ctx.stroke(); },
+  },
+  colonna: {
+    name: 'Colonna forno', cat: 'Cucina', w: 60, d: 60, h: 215, color: '#f2efe9',
+    build(g, it) { box(g, it.w - 0.4, it.h, it.d, 0, 0, 0, solid(it.color, { rough: 0.4 })); box(g, it.w - 6, 58, 1, 0, 85, it.d / 2, solid('#111', { rough: 0.1 })); box(g, it.w - 10, 1.5, 2, 0, 140, it.d / 2 + 1, CHROME); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); rect(ctx, -it.w / 2 + 3, it.d / 2 - 4, it.w - 6, 4); },
+  },
+  // Camera
+  letto2: {
+    name: 'Letto matrimoniale', cat: 'Camera', w: 170, d: 210, h: 100, color: '#f2efe9', color2: '#8a7a6a',
+    build(g, it) {
+      const fr = solid(it.color2, { rough: 0.8 }), sheet = solid(it.color, { rough: 1 });
+      box(g, it.w, 28, it.d, 0, 4, 0, fr, 2);
+      box(g, it.w - 6, 20, it.d - 6, 0, 30, 1, sheet, 6);
+      box(g, it.w, it.h, 8, 0, 4, -it.d / 2 + 4, fr, 3);
+      const np = it.w > 120 ? 2 : 1, pw = (it.w - 20) / np;
+      for (let i = 0; i < np; i++) box(g, pw - 6, 12, 40, -it.w / 2 + 10 + pw * (i + 0.5), 48, -it.d / 2 + 34, sheet, 6);
+      box(g, it.w - 4, 4, it.d * 0.55, 0, 49, it.d * 0.2, solid(dark(it.color)), 2);
+      legs4(g, it.w, it.d, 4, 8, 5, solid(METAL));
+    },
+    draw(ctx, it) {
+      box2d(ctx, it, '#fff'); rect(ctx, -it.w / 2, -it.d / 2, it.w, 8);
+      const np = it.w > 120 ? 2 : 1, pw = (it.w - 20) / np;
+      for (let i = 0; i < np; i++) rrect(ctx, -it.w / 2 + 10 + pw * i + 3, -it.d / 2 + 14, pw - 6, 40, 6);
+      ctx.beginPath(); ctx.moveTo(-it.w / 2, -it.d / 2 + 70); ctx.lineTo(it.w / 2, -it.d / 2 + 70); ctx.stroke();
+    },
+  },
+  letto1: { like: 'letto2', name: 'Letto singolo', w: 90 },
+  comodino: {
+    name: 'Comodino', cat: 'Camera', w: 45, d: 40, h: 50, color: '#c9a274',
+    build(g, it) { const m = solid(it.color, { rough: 0.5 }); box(g, it.w, it.h - 10, it.d, 0, 10, 0, m, 1); legs4(g, it.w, it.d, 10, 3, 3, m); box(g, it.w - 4, 0.6, 0.4, 0, it.h - 18, it.d / 2, solid(dark(it.color))); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); },
+  },
+  armadio: {
+    name: 'Armadio', cat: 'Camera', w: 200, d: 60, h: 240, color: '#f2efe9',
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.45 });
+      box(g, it.w, it.h, it.d, 0, 0, 0, m);
+      const doors = Math.max(1, Math.round(it.w / 50));
+      for (let i = 1; i < doors; i++) box(g, 0.4, it.h - 4, 0.4, -it.w / 2 + it.w * i / doors, 2, it.d / 2, solid(dark(it.color)));
+      for (let i = 0; i < doors; i++) box(g, 1.5, 30, 2, -it.w / 2 + it.w * (i + (i % 2 ? 0.1 : 0.9)) / doors, it.h / 2 - 15, it.d / 2 + 1, CHROME);
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); ctx.beginPath(); ctx.moveTo(-it.w / 2 + 4, 0); ctx.lineTo(it.w / 2 - 4, 0); ctx.stroke(); for (let x = -it.w / 2 + 15; x < it.w / 2 - 5; x += 15) { ctx.beginPath(); ctx.moveTo(x, -6); ctx.lineTo(x - 6, 6); ctx.stroke(); } },
+  },
+  cassettiera: {
+    name: 'Cassettiera', cat: 'Camera', w: 100, d: 50, h: 80, color: '#f2efe9',
+    build(g, it) { const m = solid(it.color, { rough: 0.45 }); box(g, it.w, it.h - 8, it.d, 0, 8, 0, m, 1); legs4(g, it.w, it.d, 8, 4, 3, solid(METAL)); const n = 3; for (let i = 1; i < n; i++) box(g, it.w - 2, 0.5, 0.4, 0, 8 + (it.h - 8) * i / n, it.d / 2, solid(dark(it.color))); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); },
+  },
+  scrivania: {
+    name: 'Scrivania', cat: 'Camera', w: 120, d: 60, h: 75, color: '#f2efe9',
+    build(g, it) { const m = solid(it.color, { rough: 0.45 }); box(g, it.w, 3, it.d, 0, it.h - 3, 0, m); for (const s of [-1, 1]) box(g, 3, it.h - 3, it.d - 4, s * (it.w / 2 - 3), 0, 0, solid(METAL)); box(g, 50, 30, 2, 0, it.h + 10, -it.d / 2 + 10, solid('#111', { rough: 0.2 })); box(g, 4, 10, 4, 0, it.h, -it.d / 2 + 10, solid('#222')); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); rect(ctx, -25, -it.d / 2 + 9, 50, 2, '#333'); },
+  },
+  // Bagno
+  wc: {
+    name: 'WC', cat: 'Bagno', w: 38, d: 55, h: 40, color: '#f7f7f5',
+    build(g, it) { const m = CERAMIC; box(g, it.w, 35, 16, 0, 0, -it.d / 2 + 8, m, 4); const b = cyl(g, it.w / 2, it.h - 2, 0, 0, 5, m, it.w / 2.4, 32); b.scale.z = (it.d - 16) / it.w; box(g, it.w - 2, 3, it.d - 8, 0, it.h - 2, 3, solid('#ffffff', { rough: 0.3 }), 1.4); },
+    draw(ctx, it) { rect(ctx, -it.w / 2, -it.d / 2, it.w, 16, '#fff'); ell(ctx, 0, 5, it.w / 2 - 1, (it.d - 16) / 2 + 1, '#fff'); },
+  },
+  bidet: {
+    name: 'Bidet', cat: 'Bagno', w: 38, d: 55, h: 40, color: '#f7f7f5',
+    build(g, it) { const b = cyl(g, it.w / 2, it.h, 0, 0, 2, CERAMIC, it.w / 2.4, 32); b.scale.z = (it.d - 4) / it.w; cyl(g, 1.5, 8, 0, it.h, -it.d / 2 + 8, CHROME); },
+    draw(ctx, it) { ell(ctx, 0, 2, it.w / 2, it.d / 2 - 2, '#fff'); circ(ctx, 0, -it.d / 2 + 8, 2); },
+  },
+  lavabo: {
+    name: 'Lavabo con mobile', cat: 'Bagno', w: 80, d: 48, h: 85, color: '#c9a274',
+    build(g, it) {
+      box(g, it.w, it.h - 30, it.d - 2, 0, 20, -1, solid(it.color, { rough: 0.5 }));
+      box(g, it.w, 10, it.d, 0, it.h - 10, 0, CERAMIC, 2);
+      box(g, it.w - 20, 1, it.d - 18, 0, it.h - 0.5, 3, solid('#e5e5e2', { rough: 0.2 }), 0);
+      cyl(g, 1.5, 20, 0, it.h, -it.d / 2 + 6, CHROME); box(g, 3, 3, 12, 0, it.h + 18, -it.d / 2 + 11, CHROME);
+      box(g, Math.min(it.w, 90), 70, 2, 0, it.h + 30, -it.d / 2 - 1, MIRROR);
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); rrect(ctx, -it.w / 2 + 10, -it.d / 2 + 12, it.w - 20, it.d - 18, 8); circ(ctx, 0, -it.d / 2 + 6, 2); },
+  },
+  doccia: {
+    name: 'Doccia', cat: 'Bagno', w: 90, d: 90, h: 200, color: '#f7f7f5',
+    build(g, it) {
+      box(g, it.w, 5, it.d, 0, 0, 0, CERAMIC);
+      box(g, 1, it.h - 5, it.d, it.w / 2 - 0.5, 5, 0, GLASS); box(g, it.w, it.h - 5, 1, 0, 5, it.d / 2 - 0.5, GLASS);
+      cyl(g, 1, 100, -it.w / 2 + 6, 100, -it.d / 2 + 6, CHROME);
+      cyl(g, 10, 1, -it.w / 2 + 16, it.h - 5, -it.d / 2 + 16, CHROME);
+      box(g, 2, 2, 12, -it.w / 2 + 6, it.h - 5, -it.d / 2 + 11, CHROME);
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); ctx.beginPath(); ctx.moveTo(-it.w / 2, -it.d / 2); ctx.lineTo(it.w / 2, it.d / 2); ctx.moveTo(it.w / 2, -it.d / 2); ctx.lineTo(-it.w / 2, it.d / 2); ctx.stroke(); circ(ctx, 0, 0, 3); },
+  },
+  vasca: {
+    name: 'Vasca', cat: 'Bagno', w: 170, d: 75, h: 55, color: '#f7f7f5',
+    build(g, it) { box(g, it.w, it.h, it.d, 0, 0, 0, CERAMIC, 3); box(g, it.w - 14, 2, it.d - 14, 0, it.h - 1.5, 0, solid('#e9eef0', { rough: 0.1 }), 0); cyl(g, 1.5, 12, -it.w / 2 + 6, it.h, 0, CHROME); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); rrect(ctx, -it.w / 2 + 7, -it.d / 2 + 7, it.w - 14, it.d - 14, 25); circ(ctx, -it.w / 2 + 25, 0, 3); },
+  },
+  // Luci
+  lampadario: {
+    name: 'Lampada a soffitto', cat: 'Luci', w: 40, d: 40, h: 25, elev: null, color: '#f2efe9', light: 'ceiling',
+    build(g, it) {
+      const r = it.w / 2;
+      cyl(g, 0.4, 40, 0, it.h, 0, solid('#222'));
+      const shade = cyl(g, r * 0.5, it.h * 0.8, 0, 0, 0, solid(it.color, { rough: 0.7, side: THREE.DoubleSide }), r, 32);
+      shade.geometry = new THREE.CylinderGeometry(r * 0.45 * M, r * M, it.h * 0.8 * M, 32, 1, true);
+      sphere(g, 5, 0, 6, 0, solid('#fff8e8', { emissive: '#ffe2b0', ei: 3 }));
+    },
+    draw(ctx, it) { circ(ctx, 0, 0, it.w / 2); ctx.beginPath(); ctx.moveTo(-it.w / 2, 0); ctx.lineTo(it.w / 2, 0); ctx.moveTo(0, -it.w / 2); ctx.lineTo(0, it.w / 2); ctx.stroke(); },
+  },
+  lampadaTerra: {
+    name: 'Lampada da terra', cat: 'Luci', w: 40, d: 40, h: 170, color: '#f2efe9', light: 'floor',
+    build(g, it) {
+      cyl(g, 14, 2, 0, 0, 0, solid(METAL)); cyl(g, 1, it.h - 30, 0, 2, 0, solid(METAL));
+      const sh = new THREE.Mesh(new THREE.CylinderGeometry(it.w / 2 * 0.7 * M, it.w / 2 * M, 30 * M, 32, 1, true), solid(it.color, { rough: 0.8, side: THREE.DoubleSide }));
+      sh.position.y = (it.h - 15) * M; g.add(sh);
+      sphere(g, 5, 0, it.h - 18, 0, solid('#fff8e8', { emissive: '#ffe2b0', ei: 3 }));
+    },
+    draw(ctx, it) { circ(ctx, 0, 0, it.w / 2); circ(ctx, 0, 0, 3); },
+  },
+  // Varie
+  pianta: {
+    name: 'Pianta', cat: 'Varie', w: 45, d: 45, h: 120, color: '#5d7a4a',
+    build(g, it) {
+      cyl(g, it.w * 0.3, 35, 0, 0, 0, solid('#d8d2c7', { rough: 0.7 }), it.w * 0.24);
+      const leaf = solid(it.color, { rough: 0.7 });
+      for (let i = 0; i < 9; i++) {
+        const a = i * 2.4, r = it.w * 0.22 * (0.3 + (i % 3) * 0.35);
+        sphere(g, it.w * 0.22, Math.cos(a) * r, 35 + (it.h - 35) * (0.35 + 0.08 * (i % 5)), Math.sin(a) * r, leaf, 1.3);
+      }
+    },
+    draw(ctx, it) { circ(ctx, 0, 0, it.w * 0.3); for (let i = 0; i < 7; i++) { const a = i * Math.PI * 2 / 7; ell(ctx, Math.cos(a) * it.w * 0.28, Math.sin(a) * it.w * 0.28, it.w * 0.2, it.w * 0.2); } },
+  },
+  scatola: {
+    name: 'Blocco generico', cat: 'Varie', w: 60, d: 60, h: 60, color: '#d8d2c7',
+    build(g, it) { box(g, it.w, it.h, it.d, 0, 0, 0, solid(it.color, { rough: 0.7 })); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); },
+  },
+  cilindro: {
+    name: 'Colonna / cilindro', cat: 'Varie', w: 40, d: 40, h: 270, color: '#f2efe9', round: true,
+    build(g, it) { const c = cyl(g, it.w / 2, it.h, 0, 0, 0, solid(it.color, { rough: 0.7 }), it.w / 2, 48); c.scale.z = it.d / it.w; },
+    draw(ctx, it) { ell(ctx, 0, 0, it.w / 2, it.d / 2, '#fff'); },
+  },
+  modello: {
+    name: 'Modello importato', cat: 'Importati', w: 100, d: 100, h: 100, color: '#d8d2c7', hidden: true,
+    build() { /* costruito da models.js */ },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); ctx.beginPath(); ctx.moveTo(-it.w / 2, -it.d / 2); ctx.lineTo(it.w / 2, it.d / 2); ctx.stroke(); },
+  },
+};
+
+// "like": eredita da un'altra voce cambiando solo alcuni valori
+for (const [k, v] of Object.entries(CATALOG)) {
+  if (!v.like) continue;
+  const base = CATALOG[v.like];
+  const own = { ...v };
+  const extra = own.extra;
+  CATALOG[k] = { ...base, ...own };
+  if (extra) CATALOG[k].build = (g, it) => { base.build(g, it); extra(g, it); };
+  if (!own.draw) CATALOG[k].draw = base.draw;
+}
+
+export const CATEGORIES = ['Soggiorno', 'Pranzo', 'Cucina', 'Camera', 'Bagno', 'Luci', 'Varie'];
+
+export function newItem(kind, x, y) {
+  const c = CATALOG[kind];
+  return { id: 'i' + Math.random().toString(36).slice(2, 9), kind, x, y, rot: 0, w: c.w, d: c.d, h: c.h, elev: c.elev ?? 0, color: c.color, color2: c.color2 || null };
+}
+
+/** Gruppo 3D di un mobile, gia' posizionato. models: mappa id -> geometria per i modelli importati. */
+export function buildItem(it, wallHeight, modelGeo) {
+  const c = CATALOG[it.kind] || CATALOG.scatola;
+  const g = new THREE.Group();
+  if (it.kind === 'modello' && modelGeo) {
+    const m = new THREE.Mesh(modelGeo, modelGeo.hasAttribute('color') ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }) : solid(it.color, { rough: 0.7 }));
+    m.scale.set(it.w * M / 2, it.h * M / 2, it.d * M / 2);
+    m.position.y = it.h * M / 2;
+    g.add(m);
+  } else c.build(g, it);
+  const elev = c.light === 'ceiling' ? wallHeight - it.h - 40 : (it.elev || 0);
+  g.position.set(it.x * M, elev * M, it.y * M);
+  g.rotation.y = -it.rot * Math.PI / 180;
+  g.userData.item = it.id;
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.userData.item = it.id; } });
+  if (c.light) {
+    const L = new THREE.PointLight(0xffd9a8, 0, 0, 2);
+    L.position.y = (c.light === 'ceiling' ? 6 : it.h - 18) * M;
+    L.userData.lamp = true;
+    g.add(L);
+  }
+  return g;
+}
