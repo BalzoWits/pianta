@@ -2,7 +2,7 @@
 // mobili, stanze, quote libere e foto di sfondo. Funziona con mouse, tastiera e touch (iPad).
 import * as G from './geom.js';
 import { CATALOG } from './furniture.js';
-import { FLOORS } from './materials.js';
+import { FLOORS, floorTint } from './materials.js';
 
 const COL = {
   bg: '#f6f5f2', grid: '#e6e3dc', grid2: '#d6d2c9', wall: '#2f343b', wallSel: '#2f7bf6', node: '#2f7bf6',
@@ -55,6 +55,13 @@ export class Plan2D {
   toScreen(p) { return { x: p.x * this.view.s + this.view.ox, y: p.y * this.view.s + this.view.oy }; }
   toPlan(x, y) { return { x: (x - this.view.ox) / this.view.s, y: (y - this.view.oy) / this.view.s }; }
   px(n) { return n / this.view.s; } // n pixel in cm
+  /** Passo di aggancio: la griglia del progetto, piu' fine quando si ingrandisce. */
+  gridStep() {
+    const g = this.doc.settings.grid;
+    if (!g) return 0;
+    for (const c of [g, 5, 2, 1]) if (c <= g && c * this.view.s <= 12) return c;
+    return 0.5;
+  }
 
   resize() {
     const r = this.cv.getBoundingClientRect();
@@ -169,11 +176,11 @@ export class Plan2D {
     }
     // griglia
     if (!res.kind && !ax && !ay && !angLocked && d.settings.grid && !opts.noGrid && SP.grid !== false) {
-      const g = d.settings.grid;
+      const g = this.gridStep();
       q = { x: Math.round(q.x / g) * g, y: Math.round(q.y / g) * g };
     } else if (!res.kind && angLocked && d.settings.grid && opts.from && !ax && !ay && SP.grid !== false) {
       // lunghezza arrotondata alla griglia lungo la direzione bloccata
-      const g = d.settings.grid;
+      const g = this.gridStep();
       const L = Math.round(G.dist(opts.from, q) / g) * g;
       q = G.add(opts.from, G.mul(angLocked, L));
     }
@@ -193,6 +200,7 @@ export class Plan2D {
         const h = this.itemHandles(it);
         if (G.dist(p, h.rot) < this.px(12)) return { type: 'item-rot', id: it.id };
         if (G.dist(p, h.size) < this.px(12)) return { type: 'item-size', id: it.id };
+        for (const k of ['E', 'W', 'S', 'N']) if (G.dist(p, h[k]) < this.px(13)) return { type: 'item-side', id: it.id, side: k };
       }
     }
     if (sel && sel.type === 'dim') {
@@ -200,7 +208,7 @@ export class Plan2D {
       if (dm) { const g = this.dimGeom(dm); if (G.dist(p, g.a2) < this.px(10)) return { type: 'dim-a', id: dm.id }; if (G.dist(p, g.b2) < this.px(10)) return { type: 'dim-b', id: dm.id }; }
     }
     // nodi (sempre afferrabili, sopra le pareti)
-    for (const n of d.nodes) if (G.dist(n, p) < this.px(9)) return { type: 'node', id: n.id };
+    { let bn = null, bd = this.px(13); for (const n of d.nodes) { const dd = G.dist(n, p); if (dd < bd) { bd = dd; bn = n; } } if (bn) return { type: 'node', id: bn.id }; }
     // aperture
     const corners = this.corners || G.wallCorners(d);
     for (const o of d.openings) {
@@ -244,7 +252,13 @@ export class Plan2D {
     return { x: it.x + x * Math.cos(a) - y * Math.sin(a), y: it.y + x * Math.sin(a) + y * Math.cos(a) };
   }
   itemHandles(it) {
-    return { rot: this.itemWorld(it, 0, -it.d / 2 - this.px(26)), size: this.itemWorld(it, it.w / 2, it.d / 2) };
+    const o = this.px(14);
+    return {
+      rot: this.itemWorld(it, 0, -it.d / 2 - this.px(30)), size: this.itemWorld(it, it.w / 2, it.d / 2),
+      // freccette: destra, sinistra, davanti, dietro (fuori dal mobile)
+      E: this.itemWorld(it, it.w / 2 + o, 0), W: this.itemWorld(it, -it.w / 2 - o, 0),
+      S: this.itemWorld(it, 0, it.d / 2 + o), N: this.itemWorld(it, it.w * 0.3, -it.d / 2 - o),
+    };
   }
   /** Avvicina il mobile al filo del muro piu' vicino girandogli la schiena verso il muro. */
   snapItemToWall(it, p) {
@@ -270,6 +284,34 @@ export class Plan2D {
     const rot = Math.atan2(-nrm.x, nrm.y) * 180 / Math.PI;
     const pos = G.toWorld(c, l.s, face + side * it.d / 2);
     return { x: pos.x, y: pos.y, rot: Math.round(rot * 100) / 100 };
+  }
+
+  /**
+   * Magnetismo fra mobili con la stessa rotazione (o ruotati di 90°): si accostano lato contro lato
+   * e si allineano al filo del vicino. tol in cm (di default 10 pixel dello schermo).
+   */
+  snapItemToItems(it, tol = this.px(10)) {
+    if (it.kind === 'tappeto' || it.kind === 'lampadario') return false;
+    let bx = null, by = null;
+    for (const o of this.doc.items) {
+      if (o === it || o.kind === 'tappeto' || o.kind === 'lampadario') continue;
+      const dr = (((o.rot - it.rot) % 90) + 90) % 90;
+      if (dr > 1 && dr < 89) continue;
+      const q = (((o.rot - it.rot) % 180) + 180) % 180;
+      const swap = Math.abs(q - 90) < 1;
+      const ow = swap ? o.d : o.w, od = swap ? o.w : o.d;
+      const l = this.itemLocal(it, o);
+      const near = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0) > -tol;
+      const xs = [[it.w / 2, l.x - ow / 2], [-it.w / 2, l.x + ow / 2], [-it.w / 2, l.x - ow / 2], [it.w / 2, l.x + ow / 2]];
+      const ys = [[it.d / 2, l.y - od / 2], [-it.d / 2, l.y + od / 2], [-it.d / 2, l.y - od / 2], [it.d / 2, l.y + od / 2]];
+      const rowY = near(-it.d / 2, it.d / 2, l.y - od / 2, l.y + od / 2), rowX = near(-it.w / 2, it.w / 2, l.x - ow / 2, l.x + ow / 2);
+      if (rowY) for (const [m, e] of xs) { const c = e - m; if (Math.abs(c) < tol && (bx === null || Math.abs(c) < Math.abs(bx))) bx = c; }
+      if (rowX) for (const [m, e] of ys) { const c = e - m; if (Math.abs(c) < tol && (by === null || Math.abs(c) < Math.abs(by))) by = c; }
+    }
+    if (bx === null && by === null) return false;
+    const c = this.itemWorld(it, bx || 0, by || 0);
+    it.x = c.x; it.y = c.y;
+    return true;
   }
 
   dimGeom(dm) {
@@ -371,7 +413,8 @@ export class Plan2D {
       this.app.photo.move(p, this, !!this.pointers.size);
     } else if (T === 'select') {
       const h = this.hit(p);
-      this.cv.style.cursor = !h ? 'default' : h.type === 'item-rot' ? 'alias' : h.type === 'item-size' ? 'nwse-resize' : h.type === 'roomface' ? 'default' : 'move';
+      this.hoverHit = h && h.type !== 'roomface' ? h : null;
+      this.cv.style.cursor = !h ? 'default' : h.type === 'item-rot' ? 'alias' : h.type === 'item-size' ? 'nwse-resize' : h.type === 'item-side' ? 'ew-resize' : h.type === 'roomface' ? 'default' : 'move';
     }
     this.redraw();
   }
@@ -433,7 +476,7 @@ export class Plan2D {
     const undo = () => { const o = JSON.parse(snap); Object.assign(d, o); this.app.changed(); };
     if (h.type === 'node') {
       const n = G.nodeById(d, h.id);
-      this.drag = { type: 'node', n, undo, label: 'Sposta nodo', end: () => this._mergeNode(n) };
+      this.drag = { type: 'node', n, off: { x: n.x - p.x, y: n.y - p.y }, undo, label: 'Sposta angolo', end: () => this._mergeNode(n) };
     } else if (h.type === 'wall') {
       const w = G.wallById(d, h.id);
       const A = G.nodeById(d, w.a), B = G.nodeById(d, w.b);
@@ -447,6 +490,8 @@ export class Plan2D {
       this.drag = { type: 'item-rot', it: d.items.find(i => i.id === h.id), undo, label: 'Ruota arredo' };
     } else if (h.type === 'item-size') {
       this.drag = { type: 'item-size', it: d.items.find(i => i.id === h.id), undo, label: 'Ridimensiona arredo' };
+    } else if (h.type === 'item-side') {
+      this.drag = { type: 'item-side', side: h.side, it: d.items.find(i => i.id === h.id), undo, label: 'Ridimensiona arredo' };
     } else if (h.type === 'room') {
       const r = d.rooms.find(x => x.id === h.id);
       this.drag = { type: 'room', r, off: { x: r.x - p.x, y: r.y - p.y }, undo, label: 'Sposta etichetta' };
@@ -460,14 +505,17 @@ export class Plan2D {
   _dragMove(dr, p, e) {
     const d = this.doc;
     if (dr.type === 'node') {
-      const s = this.snap(p, { exclude: new Set([dr.n.id]), free: e.altKey });
+      // si muove come il cursore (senza saltare sotto di lui) e senza la griglia assoluta: le pareti
+      // ricalcate dalla foto non stanno sulla griglia e salterebbero appena toccate
+      p = { x: p.x + dr.off.x, y: p.y + dr.off.y };
+      const s = this.snap(p, { exclude: new Set([dr.n.id]), free: e.altKey, noGrid: true });
       // aggancio angolare rispetto agli altri estremi delle pareti collegate
       dr.n.x = s.p.x; dr.n.y = s.p.y;
       if (s.kind === 'free' || s.kind === 'photo') {
         for (const w of d.walls) {
           if (w.a !== dr.n.id && w.b !== dr.n.id) continue;
           const o = G.nodeById(d, w.a === dr.n.id ? w.b : w.a);
-          const s2 = this.snap(p, { exclude: new Set([dr.n.id]), from: o, free: e.altKey });
+          const s2 = this.snap(p, { exclude: new Set([dr.n.id]), from: o, free: e.altKey, noGrid: true });
           if (s2.kind === 'angle' || s2.kind === 'align') { dr.n.x = s2.p.x; dr.n.y = s2.p.y; this.hover = s2; break; }
         }
       } else this.hover = s;
@@ -475,7 +523,7 @@ export class Plan2D {
     } else if (dr.type === 'wall') {
       let v = G.sub(p, dr.p0);
       if (!dr.free) { const n = G.perp(G.norm(G.sub(dr.B0, dr.A0))); v = G.mul(n, G.dot(v, n)); }
-      const g = d.settings.grid;
+      const g = this.gridStep();
       if (g && !e.altKey) { const L = G.len(v); if (L > 0) v = G.mul(G.norm(v), Math.round(L / g) * g); }
       dr.A.x = dr.A0.x + v.x; dr.A.y = dr.A0.y + v.y; dr.B.x = dr.B0.x + v.x; dr.B.y = dr.B0.y + v.y;
       this.app.changed(true);
@@ -491,6 +539,7 @@ export class Plan2D {
       if (!dr.free && !e.altKey) {
         const s = this.snapItemToWall(dr.it, q);
         if (s) { dr.it.x = s.x; dr.it.y = s.y; dr.it.rot = s.rot; } else dr.it.rot = dr.rot0;
+        this.snapItemToItems(dr.it);
       }
       this.app.changed(true);
     } else if (dr.type === 'item-rot') {
@@ -505,6 +554,25 @@ export class Plan2D {
       const nw = Math.max(5, Math.round((l.x + dr.it.w / 2) / g) * g), nd = Math.max(5, Math.round((l.y + dr.it.d / 2) / g) * g);
       const c = this.itemWorld(dr.it, (nw - dr.it.w) / 2, (nd - dr.it.d) / 2);
       dr.it.x = c.x; dr.it.y = c.y; dr.it.w = nw; dr.it.d = nd;
+      this.app.changed(true);
+    } else if (dr.type === 'item-side') {
+      // una sola misura; il lato opposto resta fermo
+      const it = dr.it, l = this.itemLocal(it, p), g = e.altKey ? 1 : Math.max(1, this.gridStep() / 2 || 1);
+      const o = this.px(14);
+      let dx = 0, dy = 0, f = 1;
+      if (dr.side === 'E' || dr.side === 'W') {
+        const sg = dr.side === 'E' ? 1 : -1;
+        const nw = Math.max(5, Math.round((sg * l.x - o + it.w / 2) / g) * g);
+        dx = sg * (nw - it.w) / 2; f = nw / it.w; it.w = nw;
+        if (it.lock) { it.d *= f; it.h *= f; }
+      } else {
+        const sg = dr.side === 'S' ? 1 : -1;
+        const nd = Math.max(5, Math.round((sg * l.y - o + it.d / 2) / g) * g);
+        dy = sg * (nd - it.d) / 2; f = nd / it.d; it.d = nd;
+        if (it.lock) { it.w *= f; it.h *= f; }
+      }
+      const c = this.itemWorld(it, dx, dy);
+      it.x = c.x; it.y = c.y;
       this.app.changed(true);
     } else if (dr.type === 'room') {
       dr.r.x = p.x + dr.off.x; dr.r.y = p.y + dr.off.y;
@@ -662,7 +730,7 @@ export class Plan2D {
       ctx.beginPath(); r.inner.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.closePath();
       const key = r.label && r.label.floor || 'parquet';
       const selected = sel && sel.type === 'room' && r.label && sel.id === r.label.id;
-      ctx.fillStyle = selected ? '#dce9fd' : (FLOOR_TINT[key] || '#fff');
+      ctx.fillStyle = selected ? '#dce9fd' : (FLOOR_TINT[key] || floorTint(key) || '#fff');
       ctx.globalAlpha = this.app.photo && this.app.photo.visible() ? 0.55 : 1;
       ctx.fill();
       ctx.globalAlpha = 1;
@@ -687,6 +755,21 @@ export class Plan2D {
     for (const dm of d.dims) this._drawDim(dm, sel && sel.type === 'dim' && sel.id === dm.id);
     // nomi e superfici delle stanze
     for (const r of this.rooms) this._roomLabel(r);
+    // con «Seleziona»: angoli sempre visibili (punti da trascinare) ed evidenza di cosa c'e' sotto il cursore
+    if (this.tool === 'select') {
+      const hh = !this.drag ? this.hoverHit : null;
+      if (hh && hh.type === 'wall') {
+        const c = this.corners.get(hh.id);
+        if (c) { const poly = G.wallPolygon(c); ctx.beginPath(); poly.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)); ctx.closePath(); ctx.strokeStyle = COL.sel; ctx.lineWidth = lw * 2.5; ctx.stroke(); }
+      }
+      for (const n of d.nodes) {
+        const hot = hh && hh.type === 'node' && hh.id === n.id;
+        ctx.beginPath(); ctx.arc(n.x, n.y, this.px(hot ? 7 : 3.5), 0, 7);
+        ctx.fillStyle = hot ? COL.sel : 'rgba(255,255,255,0.9)'; ctx.fill();
+        ctx.lineWidth = lw * 1.5; ctx.strokeStyle = COL.node; ctx.stroke();
+      }
+      if (hh && (hh.type === 'item' || hh.type === 'opening')) this.cv.title = hh.type === 'item' ? 'Arredo' : 'Porta o finestra';
+    }
     // nodi della parete selezionata
     if (sel && (sel.type === 'wall' || sel.type === 'node')) {
       const ids = sel.type === 'node' ? [sel.id] : (() => { const w = G.wallById(d, sel.id); return w ? [w.a, w.b] : []; })();
@@ -825,6 +908,25 @@ export class Plan2D {
         ctx.beginPath();
         if (shape === 'c') ctx.arc(p.x, p.y, this.px(7), 0, 7); else ctx.rect(p.x - this.px(6), p.y - this.px(6), this.px(12), this.px(12));
         ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = this.px(2); ctx.stroke();
+      }
+      // freccette doppie sui lati
+      const a = it.rot * Math.PI / 180;
+      for (const [k, ang] of [['E', 0], ['W', 0], ['S', Math.PI / 2], ['N', Math.PI / 2]]) {
+        const q = h[k];
+        ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(a + ang);
+        const L = this.px(9), W = this.px(4.5);
+        ctx.beginPath(); ctx.arc(0, 0, this.px(11), 0, 7); ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(-L, 0); ctx.lineTo(-L + W, -W); ctx.lineTo(-L + W, W); ctx.closePath();
+        ctx.moveTo(L, 0); ctx.lineTo(L - W, -W); ctx.lineTo(L - W, W); ctx.closePath();
+        ctx.fillStyle = COL.sel; ctx.fill();
+        ctx.fillRect(-L + W, -this.px(1), 2 * (L - W), this.px(2));
+        ctx.restore();
+      }
+      // misure mentre si ridimensiona
+      if (this.drag && (this.drag.type === 'item-side' || this.drag.type === 'item-size')) {
+        const m = this.itemWorld(it, 0, 0);
+        this._text(m.x, m.y, `${fmtCm(it.w)} × ${fmtCm(it.d)}`, { bg: '#fff', color: COL.sel, size: 12, bold: true });
       }
     }
   }

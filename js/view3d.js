@@ -236,6 +236,7 @@ export class View3D {
         d.it.x = p.x + d.off.x; d.it.y = p.y + d.off.y;
         const s = !e.altKey && this.app.snapItem(d.it, { x: d.it.x, y: d.it.y });
         if (s) Object.assign(d.it, s); else d.it.rot = d.rot0;
+        if (!e.altKey && this.app.snapItems) this.app.snapItems(d.it);
         this._moveItemMesh(d.it);
         this.app.changed(true, true);
       }

@@ -18,6 +18,38 @@ export const FLOORS = {
 export const WALL_COLORS = ['#f4f1ea', '#ffffff', '#e8e2d6', '#d9d4cb', '#c9d3d8', '#b9c7b4', '#e6cfc0', '#d6b98f', '#9aa7b3', '#6f7b70', '#a35d4a', '#3e4550'];
 export const ITEM_COLORS = ['#f2efe9', '#d8d2c7', '#a89f91', '#6b6259', '#3b3733', '#1f1e1d', '#c9a274', '#8a5a3b', '#b9c7b4', '#5f7f8c', '#2f4858', '#b5473a', '#d9a441', '#7d6a99'];
 
+// ---------- pavimenti dalle immagini dell'utente (doc.textures, chiave "img:<id>") ----------
+const custom = new Map(); // id -> { tex, size, tint, src }
+let onCustomReady = null;
+export function onTextureLoaded(fn) { onCustomReady = fn; }
+/** Allinea le texture dell'utente con quelle del documento. */
+export function setCustomFloors(textures) {
+  for (const [id, t] of Object.entries(textures || {})) {
+    const cur = custom.get(id);
+    if (cur && cur.src === t.src) { if (cur.size !== t.size) { cur.size = t.size; matCache.delete('floor:img:' + id); } continue; }
+    const tex = new THREE.Texture();
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    const e = { tex, size: t.size || 60, tint: '#eeeeee', src: t.src };
+    custom.set(id, e);
+    matCache.delete('floor:img:' + id);
+    const img = new Image();
+    img.onload = () => {
+      tex.image = img; tex.needsUpdate = true;
+      const c = document.createElement('canvas'); c.width = c.height = 1;
+      const x = c.getContext('2d'); x.drawImage(img, 0, 0, 1, 1);
+      const [r, g, b] = x.getImageData(0, 0, 1, 1).data;
+      // tinta chiara per la pianta 2D
+      e.tint = `rgb(${Math.round(r + (255 - r) * 0.55)},${Math.round(g + (255 - g) * 0.55)},${Math.round(b + (255 - b) * 0.55)})`;
+      if (onCustomReady) onCustomReady();
+    };
+    img.src = t.src;
+  }
+}
+export const isCustomFloor = key => typeof key === 'string' && key.startsWith('img:');
+export function floorTint(key) { const e = isCustomFloor(key) && custom.get(key.slice(4)); return e ? e.tint : null; }
+
 const texCache = new Map();
 export function floorTexture(key) {
   const def = FLOORS[key] || FLOORS.parquet;
@@ -35,6 +67,7 @@ export function floorTexture(key) {
 /** Piccola anteprima del pavimento (dataURL) per i bottoni del pannello. */
 const thumbCache = new Map();
 export function floorThumb(key) {
+  if (isCustomFloor(key)) { const e = custom.get(key.slice(4)); return e ? e.src : ''; }
   if (thumbCache.has(key)) return thumbCache.get(key);
   const c = document.createElement('canvas');
   c.width = c.height = 512;
@@ -148,6 +181,13 @@ export const CERAMIC = new THREE.MeshStandardMaterial({ color: 0xf7f7f5, roughne
 export function floorMaterial(key) {
   const k = 'floor:' + key;
   if (matCache.has(k)) return matCache.get(k);
+  if (isCustomFloor(key) && custom.has(key.slice(4))) {
+    const e = custom.get(key.slice(4));
+    const m = new THREE.MeshStandardMaterial({ map: e.tex, roughness: 0.6 });
+    m.userData.texSize = e.size;
+    matCache.set(k, m);
+    return m;
+  }
   const def = FLOORS[key] || FLOORS.parquet;
   const rough = /marmo|gres|mosaico/.test(key) ? 0.25 : /moquette/.test(key) ? 1 : 0.55;
   const m = new THREE.MeshStandardMaterial({ map: floorTexture(key), roughness: rough });

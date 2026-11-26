@@ -3,7 +3,7 @@ import * as G from './geom.js';
 import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js';
 import { View3D } from './view3d.js';
 import { CATALOG, CATEGORIES, newItem } from './furniture.js';
-import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb } from './materials.js';
+import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor } from './materials.js';
 import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js';
 import { skewAngle, rotateImage, detectWalls } from './detect.js';
 import * as MD from './models.js';
@@ -20,7 +20,7 @@ const app = {
   sel: null,
   view: '2d',
   setSel, commit, changed, toolDone, onTyped, editLength, selectRoomFace, placeItemAt, previewItem,
-  askCalibration, modelGeos, snapItem: (it, p) => plan.snapItemToWall(it, p), selectRoomAt, selectedRoomCenter, walkStart,
+  askCalibration, modelGeos, snapItem: (it, p) => plan.snapItemToWall(it, p), snapItems: it => plan.snapItemToItems(it, 8), selectRoomAt, selectedRoomCenter, walkStart,
 };
 let project = null; // { id, name, rev }
 const photo = app.photo = new PhotoTool(app);
@@ -41,6 +41,7 @@ function restore(json) {
   o.models = app.doc.models;
   if (o.background) o.background.src = bgSources.get(o.background.sid);
   app.doc = o;
+  setCustomFloors(o.textures);
   photo.refresh();
 }
 let history = [], hIdx = -1;
@@ -314,12 +315,88 @@ function rangeField(label, value, min, max, step, onSet, fmt = v => v) {
   inp.addEventListener('change', () => onSet(parseFloat(inp.value), true));
   return h('label', { class: 'field' }, h('span', {}, label, ' ', out), inp);
 }
+// ---------- colori: tinte pronte, rotella e codice esadecimale ----------
+let swIdx = 0, wheelOpen = null;
 function swatches(colors, cur, onPick) {
+  const key = swIdx++;
+  const wrap = h('div', { class: 'swwrap' });
   const box = h('div', { class: 'sw' });
   for (const c of colors) box.append(h('button', { type: 'button', class: c.toLowerCase() === (cur || '').toLowerCase() ? 'on' : '', style: `background:${c}`, title: c, onclick: () => onPick(c) }));
-  const ci = h('input', { type: 'color', value: cur || '#ffffff', title: 'Altro colore' });
-  ci.addEventListener('change', () => onPick(ci.value));
-  box.append(ci);
+  const open = wheelOpen === key;
+  box.append(h('button', { type: 'button', class: 'wheelbtn' + (open ? ' on' : ''), title: 'Altro colore: rotella e codice', onclick: () => { wheelOpen = open ? null : key; renderPanel(); } }));
+  wrap.append(box);
+  if (open) wrap.append(colorWheel(cur || '#ffffff', onPick));
+  return wrap;
+}
+const hex2rgb = hx => { const n = parseInt(hx.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+const rgb2hex = (r, g, b) => '#' + [r, g, b].map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+function hsv2rgb(hh, s, v) {
+  const f = n => { const k = (n + hh / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); };
+  return [f(5) * 255, f(3) * 255, f(1) * 255];
+}
+function rgb2hsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let hh = 0;
+  if (d) hh = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(hh * 60 + 360) % 360, mx ? d / mx : 0, mx];
+}
+/** Rotella (tinta = angolo, saturazione = distanza dal centro) + luminosita' + esadecimale. */
+function colorWheel(cur, onPick) {
+  const N = 180, R = N / 2;
+  let [hh, s, v] = rgb2hsv(...hex2rgb(/^#[0-9a-f]{6}$/i.test(cur) ? cur : '#ffffff'));
+  const box = h('div', { class: 'wheel' });
+  const cv = h('canvas', { width: N, height: N });
+  const ctx = cv.getContext('2d');
+  const disc = ctx.createImageData(N, N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const dx = x - R + 0.5, dy = y - R + 0.5, r = Math.hypot(dx, dy) / R, o = (y * N + x) * 4;
+    if (r > 1) { disc.data[o + 3] = 0; continue; }
+    const [cr, cg, cb] = hsv2rgb((Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360, r, 1);
+    disc.data[o] = cr; disc.data[o + 1] = cg; disc.data[o + 2] = cb; disc.data[o + 3] = 255;
+  }
+  const chip = h('span', { class: 'chip' });
+  const hexIn = h('input', { type: 'text', maxlength: 7, spellcheck: 'false', class: 'hex' });
+  const val = h('input', { type: 'range', min: 0, max: 100, step: 1 });
+  const cur3 = () => rgb2hex(...hsv2rgb(hh, s, v));
+  const draw = () => {
+    ctx.clearRect(0, 0, N, N);
+    ctx.putImageData(disc, 0, 0);
+    // la luminosita' scurisce tutta la rotella
+    ctx.globalCompositeOperation = 'source-atop'; ctx.fillStyle = `rgba(0,0,0,${1 - v})`; ctx.fillRect(0, 0, N, N); ctx.globalCompositeOperation = 'source-over';
+    const a = hh * Math.PI / 180, mx = R + Math.cos(a) * s * R, my = R + Math.sin(a) * s * R;
+    ctx.beginPath(); ctx.arc(mx, my, 7, 0, 7); ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#000'; ctx.stroke();
+    const c = cur3();
+    chip.style.background = c;
+    if (document.activeElement !== hexIn) hexIn.value = c;
+    val.value = Math.round(v * 100);
+    val.style.background = `linear-gradient(to right, #000, ${rgb2hex(...hsv2rgb(hh, s, 1))})`;
+  };
+  const fromXY = e => {
+    const r = cv.getBoundingClientRect();
+    const dx = (e.clientX - r.left) * N / r.width - R, dy = (e.clientY - r.top) * N / r.height - R;
+    hh = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360; s = Math.min(1, Math.hypot(dx, dy) / R);
+    if (v < 0.05) v = 1; // da nero, scegliendo una tinta si torna alla luce
+    draw();
+  };
+  cv.addEventListener('pointerdown', e => { cv.setPointerCapture(e.pointerId); fromXY(e); });
+  cv.addEventListener('pointermove', e => { if (e.buttons || e.pointerType === 'touch' && cv.hasPointerCapture(e.pointerId)) fromXY(e); });
+  cv.addEventListener('pointerup', () => onPick(cur3()));
+  val.addEventListener('input', () => { v = val.value / 100; draw(); });
+  val.addEventListener('change', () => onPick(cur3()));
+  const applyHex = () => {
+    let t = hexIn.value.trim();
+    if (!t.startsWith('#')) t = '#' + t;
+    if (/^#[0-9a-f]{3}$/i.test(t)) t = '#' + t.slice(1).split('').map(ch => ch + ch).join('');
+    if (!/^#[0-9a-f]{6}$/i.test(t)) { toast('Codice non valido: usa #rrggbb'); draw(); return; }
+    [hh, s, v] = rgb2hsv(...hex2rgb(t));
+    draw();
+    onPick(t.toLowerCase());
+  };
+  hexIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyHex(); } });
+  hexIn.addEventListener('change', applyHex);
+  draw();
+  box.append(cv, h('div', { class: 'wheelside' }, h('label', { class: 'lum' }, 'Luminosità', val), h('div', { class: 'hexrow' }, chip, hexIn)));
   return box;
 }
 function btn(label, fn, cls = '') { return h('button', { type: 'button', class: 'btn ' + cls, onclick: fn }, label); }
@@ -327,6 +404,7 @@ function setVal(fn, label) { return v => { fn(v); commit(label); }; }
 
 function renderPanel() {
   panel.innerHTML = '';
+  swIdx = 0;
   const s = app.sel, obj = findSel(s);
   if (obj) {
     if (s.type === 'wall') return panelWall(obj);
@@ -344,6 +422,40 @@ function renderPanel() {
   if (curTool === 'photo') return panelPhoto();
   return panelHouse();
 }
+
+/** Riquadri dei pavimenti (quelli pronti, le immagini dell'utente e «+ Tua immagine»). */
+function floorPicker(cur, onPick) {
+  const fl = h('div', { class: 'floors' });
+  const tile = (k, name, src) => fl.append(h('button', { type: 'button', class: cur === k ? 'on' : '', title: name, onclick: () => onPick(k) }, h('img', { src, alt: '' }), h('span', {}, name)));
+  for (const [k, v] of Object.entries(FLOORS)) tile(k, v.name, floorThumb(k));
+  for (const [id, t] of Object.entries(app.doc.textures || {})) tile('img:' + id, t.name, t.src);
+  fl.append(h('button', { type: 'button', class: 'addimg', title: 'Usa una tua immagine (foto di piastrelle, parquet…)', onclick: () => pickFloorImage(onPick) }, h('span', { class: 'plus' }, '+'), h('span', {}, 'Tua immagine')));
+  return fl;
+}
+let floorImageCb = null;
+function pickFloorImage(cb) { floorImageCb = cb; $('#fileFloor').click(); }
+const fileFloor = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', id: 'fileFloor', hidden: true });
+document.body.appendChild(fileFloor);
+fileFloor.addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  try {
+    const url = URL.createObjectURL(f);
+    const img = await loadImage(url);
+    URL.revokeObjectURL(url);
+    // quadrato al centro, al massimo 1024 px (la texture si ripete)
+    const side = Math.min(img.naturalWidth, img.naturalHeight), out = Math.min(1024, side);
+    const c = document.createElement('canvas'); c.width = c.height = out;
+    c.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, out, out);
+    const id = G.newId('t');
+    const v = await promptText('Quanto misura nella realtà il lato dell’immagine?', '60', 'Usa', 'cm, es. 60 per una piastrella 60×60');
+    const size = parseLen(v) || 60;
+    app.doc.textures[id] = { name: f.name.replace(/\.[^.]+$/, '').slice(0, 24), src: c.toDataURL('image/jpeg', 0.85), size };
+    setCustomFloors(app.doc.textures);
+    if (floorImageCb) floorImageCb('img:' + id);
+  } catch (err) { toast('Immagine non leggibile: ' + err.message); }
+});
+onTextureLoaded(() => { plan.redraw(); view.invalidate(); });
 
 function roomsInfo() { return G.matchRooms(app.doc, G.findRooms(app.doc)); }
 
@@ -368,16 +480,14 @@ function panelHouse() {
     list.append(h('div', { class: 'it tot' }, h('span', {}, 'Superficie netta'), h('span', {}, fmtM2(tot))));
     panel.append(list);
     panel.append(h('h3', {}, 'Pavimento in tutte le stanze'));
-    const fl = h('div', { class: 'floors' });
-    for (const [k, v] of Object.entries(FLOORS)) fl.append(h('button', { type: 'button', title: v.name, onclick: () => {
+    panel.append(floorPicker(null, k => {
       // le stanze senza etichetta la ricevono, cosi' il pavimento resta legato a loro
       for (const r of rooms) {
         if (r.label) r.label.floor = k;
         else { const p = G.interiorPoint(r.inner); d.rooms.push({ id: G.newId('r'), x: p.x, y: p.y, name: '', floor: k, wallColor: '#f4f1ea' }); }
       }
       commit('Pavimento ovunque');
-    } }, h('img', { src: floorThumb(k), alt: '' }), h('span', {}, v.name)));
-    panel.append(fl);
+    }));
   }
   panel.append(h('h3', {}, 'Misure di base'));
   panel.append(numField('Altezza pareti', S.wallHeight, setVal(v => { S.wallHeight = v; }, 'Altezza pareti'), { min: 150, max: 600 }));
@@ -627,9 +737,11 @@ function panelRoom(r) {
     panel.append(h('p', {}, `Superficie ${fmtM2(info.area)} · perimetro ${fmtCm(per / 100)} m · volume ${(info.area * app.doc.settings.wallHeight / 100).toFixed(1).replace('.', ',')} m³`));
   } else panel.append(h('div', { class: 'callout' }, 'Questa etichetta non è dentro una stanza chiusa: trascinala dentro una stanza o chiudi le pareti.'));
   panel.append(h('h3', {}, 'Pavimento'));
-  const fl = h('div', { class: 'floors' });
-  for (const [k, v] of Object.entries(FLOORS)) fl.append(h('button', { type: 'button', class: (r.floor || 'parquet') === k ? 'on' : '', title: v.name, onclick: () => { r.floor = k; commit('Pavimento'); } }, h('img', { src: floorThumb(k), alt: '' }), h('span', {}, v.name)));
-  panel.append(fl);
+  panel.append(floorPicker(r.floor || 'parquet', k => { r.floor = k; commit('Pavimento'); }));
+  if (isCustomFloor(r.floor)) {
+    const t = app.doc.textures[r.floor.slice(4)];
+    if (t) panel.append(numField('Lato dell’immagine nella realtà', t.size, setVal(v => { t.size = v; setCustomFloors(app.doc.textures); }, 'Scala pavimento'), { min: 5, max: 1000 }));
+  }
   panel.append(h('h3', {}, 'Pareti'));
   panel.append(swatches(WALL_COLORS, r.wallColor || '#f4f1ea', setVal(c => { r.wallColor = c; }, 'Colore pareti')));
   panel.append(h('h3', {}, 'Soffitto'));
@@ -1003,6 +1115,8 @@ function loadDoc(doc) {
   d.settings = { ...G.emptyDoc().settings, ...(doc.settings || {}) };
   for (const k of ['nodes', 'walls', 'openings', 'rooms', 'items', 'dims']) d[k] = d[k] || [];
   d.models = d.models || {};
+  d.textures = d.textures || {};
+  setCustomFloors(d.textures);
   if (d.background && !d.background.sid) d.background.sid = G.newId('b');
   app.doc = d;
   app.sel = null;
