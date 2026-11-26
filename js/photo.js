@@ -115,8 +115,6 @@ function runAt(map, u, v, dir, r, maxRun) {
   u = Math.round(u); v = Math.round(v);
   const here = dir === 'h' ? u : v;
   const atp = p => dir === 'h' ? at(p, v) : at(u, p);
-  // dentro un muro disegnato a doppia linea il cursore sta sul bianco: si cerca un po' piu' lontano
-  r = Math.max(r, Math.min(maxRun * 0.5, r * 3));
   let start = null;
   for (let k = 0; k <= r && start == null; k++) {
     for (const s of k ? [-k, k] : [0]) {
@@ -124,7 +122,17 @@ function runAt(map, u, v, dir, r, maxRun) {
       if (at(x, y)) { start = dir === 'h' ? x : y; break; }
     }
   }
-  if (start == null) return null;
+  if (start == null) {
+    // cursore sul bianco dentro un muro a doppia linea: una linea sottile per parte, vicine fra loro
+    const find = sg => { for (let p = here + sg; Math.abs(p - here) <= maxRun; p += sg) if (atp(p)) return p; return null; };
+    const lo = find(-1), hi = find(1);
+    if (lo == null || hi == null || hi - lo > maxRun) return null;
+    let a2 = lo, b2 = hi;
+    while (lo - a2 < 4 && atp(a2 - 1)) a2--;
+    while (b2 - hi < 4 && atp(b2 + 1)) b2++;
+    if (lo - a2 >= 4 || b2 - hi >= 4) return null; // non sono linee sottili
+    return { a: a2, b: b2, len: b2 - a2 + 1, c: (a2 + b2) / 2, hollow: true };
+  }
   let a = start, b = start;
   const lim = maxRun * 2;
   while (b - a < lim && (dir === 'h' ? at(a - 1, v) : at(u, a - 1))) a--;

@@ -358,6 +358,7 @@ function panelHouse() {
   }
   if (rooms.length) {
     panel.append(h('h3', {}, 'Stanze'));
+    panel.append(h('p', {}, 'Clicca una stanza (nella pianta o qui sotto) per nome, pavimento e colori. Solo le stanze chiuse da pareti collegate si possono scegliere.'));
     const list = h('div', { class: 'list' });
     let tot = 0;
     for (const r of rooms) {
@@ -366,6 +367,17 @@ function panelHouse() {
     }
     list.append(h('div', { class: 'it tot' }, h('span', {}, 'Superficie netta'), h('span', {}, fmtM2(tot))));
     panel.append(list);
+    panel.append(h('h3', {}, 'Pavimento in tutte le stanze'));
+    const fl = h('div', { class: 'floors' });
+    for (const [k, v] of Object.entries(FLOORS)) fl.append(h('button', { type: 'button', title: v.name, onclick: () => {
+      // le stanze senza etichetta la ricevono, cosi' il pavimento resta legato a loro
+      for (const r of rooms) {
+        if (r.label) r.label.floor = k;
+        else { const p = G.interiorPoint(r.inner); d.rooms.push({ id: G.newId('r'), x: p.x, y: p.y, name: '', floor: k, wallColor: '#f4f1ea' }); }
+      }
+      commit('Pavimento ovunque');
+    } }, h('img', { src: floorThumb(k), alt: '' }), h('span', {}, v.name)));
+    panel.append(fl);
   }
   panel.append(h('h3', {}, 'Misure di base'));
   panel.append(numField('Altezza pareti', S.wallHeight, setVal(v => { S.wallHeight = v; }, 'Altezza pareti'), { min: 150, max: 600 }));
@@ -396,11 +408,16 @@ function panelWallTool() {
     panel.append(h('div', { class: 'row' }, dirBtn('→', { x: 1, y: 0 }), dirBtn('↓', { x: 0, y: 1 }), dirBtn('←', { x: -1, y: 0 }), dirBtn('↑', { x: 0, y: -1 })));
     panel.append(h('p', {}, 'Mentre disegni puoi anche scrivere la misura direttamente: compare in alto e con Invio la parete prende quella lunghezza nella direzione del cursore.'));
     panel.append(h('div', { class: 'row' }, btn('Fine (Esc)', () => plan.finishWall())));
+    panel.append(h('h3', {}, 'Agganci'));
+    const SP = plan.snapPrefs;
+    panel.append(checkField('Angoli a 15°', SP.angle !== false, v => { SP.angle = v; }));
+    panel.append(checkField('Allineamento con gli altri angoli', SP.align !== false, v => { SP.align = v; }));
+    panel.append(checkField('Griglia', SP.grid !== false, v => { SP.grid = v; }));
     if (d.background) {
-      panel.append(h('h3', {}, 'Foto'));
-      panel.append(checkField('Aggancia ai muri della foto', d.background.snap, setVal(v => { d.background.snap = v; }, 'Aggancio foto')));
+      panel.append(checkField('Muri della foto', d.background.snap, setVal(v => { d.background.snap = v; }, 'Aggancio foto')));
       panel.append(checkField('Spessore misurato sulla foto', wallTool.photoThick, v => { wallTool.photoThick = v; plan.toolOpt.photoThick = v; }));
     }
+    panel.append(h('p', {}, 'Il segno arancione mostra a cosa si aggancia il punto: quadrato = angolo esistente, × = parete, cerchio = muro della foto, croce = libero. Tenendo premuto Alt non si aggancia a niente.'));
   }
 }
 

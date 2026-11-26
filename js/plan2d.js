@@ -31,6 +31,7 @@ export class Plan2D {
     this.cv = canvas;
     this.ctx = canvas.getContext('2d');
     this.app = app;
+    this.snapPrefs = { angle: true, align: true, grid: true };
     this.view = { ox: 0, oy: 0, s: 1 }; // pixel per cm
     this.tool = 'select';
     this.toolOpt = {};
@@ -105,7 +106,15 @@ export class Plan2D {
     if (best) { res.p = { x: best.x, y: best.y }; res.kind = 'node'; res.node = best; return res; }
     // foto di sfondo: centro dei muri disegnati
     let photoSnap = null;
-    if (this.app.photo && this.app.photo.snapOn()) photoSnap = this.app.photo.snapPoint(p, this.px(14));
+    if (this.app.photo && this.app.photo.snapOn()) photoSnap = this.app.photo.snapPoint(p, this.px(10));
+    if (photoSnap) {
+      // l'aggancio non deve far saltare il punto: oltre 14 pixel sullo schermo si ignora (per asse)
+      const lim = this.px(14);
+      if (photoSnap.x != null && Math.abs(photoSnap.x - p.x) > lim) photoSnap.x = null;
+      if (photoSnap.y != null && Math.abs(photoSnap.y - p.y) > lim) photoSnap.y = null;
+      if (photoSnap.x == null && photoSnap.y == null) photoSnap = null;
+    }
+    const SP = this.snapPrefs || {};
     // angoli rispetto al punto di partenza
     let q = { ...p };
     let angLocked = false;
@@ -114,7 +123,7 @@ export class Plan2D {
       if (photoSnap.y != null) q.y = photoSnap.y;
       res.kind = 'photo'; res.thick = photoSnap.thick;
     }
-    if (opts.from && !opts.free) {
+    if (opts.from && !opts.free && SP.angle !== false) {
       const v = G.sub(q, opts.from), L = G.len(v);
       if (L > this.px(10)) {
         const a = Math.atan2(v.y, v.x);
@@ -132,7 +141,7 @@ export class Plan2D {
     }
     // allineamento con altri nodi (orizzontale/verticale)
     let ax = null, ay = null;
-    for (const n of d.nodes) {
+    for (const n of (SP.align === false ? [] : d.nodes)) {
       if (excl.has(n.id)) continue;
       if (Math.abs(n.x - q.x) < tolA && (ax == null || Math.abs(n.x - q.x) < Math.abs(ax.x - q.x))) ax = n;
       if (Math.abs(n.y - q.y) < tolA && (ay == null || Math.abs(n.y - q.y) < Math.abs(ay.y - q.y))) ay = n;
@@ -159,10 +168,10 @@ export class Plan2D {
       }
     }
     // griglia
-    if (!res.kind && !ax && !ay && !angLocked && d.settings.grid && !opts.noGrid) {
+    if (!res.kind && !ax && !ay && !angLocked && d.settings.grid && !opts.noGrid && SP.grid !== false) {
       const g = d.settings.grid;
       q = { x: Math.round(q.x / g) * g, y: Math.round(q.y / g) * g };
-    } else if (!res.kind && angLocked && d.settings.grid && opts.from && !ax && !ay) {
+    } else if (!res.kind && angLocked && d.settings.grid && opts.from && !ax && !ay && SP.grid !== false) {
       // lunghezza arrotondata alla griglia lungo la direzione bloccata
       const g = d.settings.grid;
       const L = Math.round(G.dist(opts.from, q) / g) * g;
