@@ -113,6 +113,10 @@ function runAt(map, u, v, dir, r, maxRun) {
   const { w, h, dark } = map;
   const at = (x, y) => x >= 0 && y >= 0 && x < w && y < h && dark[y * w + x] === 1;
   u = Math.round(u); v = Math.round(v);
+  const here = dir === 'h' ? u : v;
+  const atp = p => dir === 'h' ? at(p, v) : at(u, p);
+  // dentro un muro disegnato a doppia linea il cursore sta sul bianco: si cerca un po' piu' lontano
+  r = Math.max(r, Math.min(maxRun * 0.5, r * 3));
   let start = null;
   for (let k = 0; k <= r && start == null; k++) {
     for (const s of k ? [-k, k] : [0]) {
@@ -127,6 +131,23 @@ function runAt(map, u, v, dir, r, maxRun) {
   while (b - a < lim && (dir === 'h' ? at(b + 1, v) : at(u, b + 1))) b++;
   const len = b - a + 1;
   if (len > maxRun) return { long: true, a, b, len };
+  if (len <= 4) {
+    // linea sottile: muro a doppia linea? si cerca la linea parallela, prima dal lato del cursore
+    const sides = here >= (a + b) / 2 ? [1, -1] : [-1, 1];
+    for (const sg of sides) {
+      const from = sg > 0 ? b : a;
+      let p = from + 2 * sg, found = null;
+      while (Math.abs(p - from) <= maxRun) { if (atp(p)) { found = p; break; } p += sg; }
+      if (found == null || Math.abs(found - from) < 3) continue;
+      let e = found;
+      while (Math.abs(e - found) < 5 && atp(e + sg)) e += sg;
+      if (Math.abs(e - found) > 4) continue; // non e' una linea sottile
+      const A = Math.min(a, e), B = Math.max(b, e);
+      // il cursore deve stare dentro la fascia (o quasi)
+      if (here < A - r || here > B + r) continue;
+      return { a: A, b: B, len: B - A + 1, c: (A + B) / 2, hollow: true };
+    }
+  }
   return { a, b, len, c: (a + b) / 2 };
 }
 
@@ -190,56 +211,118 @@ export function parseDim(text) {
  * il testo (o a destra e sinistra se il testo e' verticale) la linea scura piu' lunga parallela al
  * testo, e la si interrompe ai trattini/frecce che la attraversano.
  */
-function lineForLabel(map, box, vertical) {
-  const { w, h, dark } = map;
+export function lineForLabel(map, box, vertical, dbg) {
+  const { w, h, gray } = map;
+  if (!map.light) { map.light = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) map.light[i] = gray[i] < 205 ? 1 : 0; }
+  const dark = map.light;
   const at = (x, y) => x >= 0 && y >= 0 && x < w && y < h && dark[y * w + x] === 1;
   const cx = (box.x0 + box.x1) / 2, cy = (box.y0 + box.y1) / 2;
   const th = vertical ? box.x1 - box.x0 : box.y1 - box.y0; // altezza del testo
   const tw = vertical ? box.y1 - box.y0 : box.x1 - box.x0;
-  let best = null;
+  const cands = [], seen = new Set();
   const reach = Math.max(8, th * 2.2);
   for (let k = -reach; k <= reach; k++) {
-    // si saltano le righe dentro il testo
-    if (Math.abs(k) < th * 0.55) continue;
+    // anche le righe del testo: spesso la linea di quota passa in mezzo al numero
     const L = vertical ? Math.round(cx + k) : Math.round(cy + k);
     const c0 = vertical ? Math.round(cy) : Math.round(cx);
-    const get = s => vertical ? at(L, s) : at(s, L);
+    // fascia di tre righe: le linee sottili sfumano su due righe o sono appena inclinate
+    const get = s => vertical ? (at(L, s) || at(L - 1, s) || at(L + 1, s)) : (at(s, L) || at(s, L - 1) || at(s, L + 1));
     // il punto di partenza (vicino al centro del testo) deve essere sulla linea
     let s0 = null;
     for (let j = 0; j <= tw / 2 && s0 == null; j++) for (const sgn of [1, -1]) if (get(c0 + sgn * j)) { s0 = c0 + sgn * j; break; }
     if (s0 == null) continue;
     // si estende tollerando piccoli buchi
-    const ext = dir => { let s = s0, gap = 0; while (gap <= 3) { const n = s + dir; if (n < 0 || n >= (vertical ? h : w)) break; if (get(n)) { s = n; gap = 0; } else { gap++; if (gap > 3) break; s = n; } } return s - dir * gap; };
+    // (il riquadro del numero si scavalca: la linea spesso passa in mezzo alle cifre)
+    const tA = (vertical ? box.y0 : box.x0) - 2, tB = (vertical ? box.y1 : box.x1) + 2;
+    const ext = dir => { let s = s0, gap = 0; while (gap <= 3) { const n = s + dir; if (n < 0 || n >= (vertical ? h : w)) break; if (get(n) || (n >= tA && n <= tB)) { s = n; gap = 0; } else { gap++; if (gap > 3) break; s = n; } } return s - dir * gap; };
     let a = ext(-1), b = ext(1);
-    if (b - a < tw * 0.9) continue;
+    // una linea di quota e' molto piu' lunga del suo numero (la barretta di "80/210" no)
+    const minLen = Math.max(tw * 1.8, th * 3);
+    if (b - a < minLen) continue;
     // trattini (dritti o obliqui) e frecce: punti in cui la linea e' attraversata, cioe' ci sono pixel
     // scuri sia sopra sia sotto la linea entro pochi pixel (in una piccola finestra di colonne)
-    const tq = Math.max(5, Math.round(th * 0.35)), tw2 = Math.max(3, Math.round(th * 0.3));
+    // trattino di fine quota: barretta obliqua a 45° (o un segno corto) che attraversa la linea.
+    // Le linee lunghe che la incrociano (richiami, muri, altre quote) non sono trattini.
+    const tq = Math.max(4, Math.round(th * 0.4));
+    const P = (s, q) => vertical ? at(L + q, s) : at(s, L + q); // q: distanza dalla linea (+/-)
+    const near = (s, q) => P(s, q) || P(s - 1, q) || P(s + 1, q);
     const crosses = s => {
-      let up = 0, dn = 0;
-      for (let q = 3; q <= tq; q++) for (let j = -tw2; j <= tw2; j++) {
-        if (vertical ? at(L - q, s + j) : at(s + j, L - q)) { up++; break; }
+      for (const sg of [1, -1]) {
+        let k = 0;
+        for (let q = 2; q <= tq; q++) if (near(s + sg * q, -q) && near(s - sg * q, q)) k++;
+        if (k >= tq - 2) return true;
       }
-      for (let q = 3; q <= tq; q++) for (let j = -tw2; j <= tw2; j++) {
-        if (vertical ? at(L + q, s + j) : at(s + j, L + q)) { dn++; break; }
-      }
-      return up >= 2 && dn >= 2;
+      // segno corto e dritto: c'e' vicino alla linea ma non continua oltre
+      let shortMark = true;
+      for (let q = 2; q <= 3; q++) if (!P(s, q) || !P(s, -q)) shortMark = false;
+      if (shortMark && !P(s, Math.round(th * 1.2)) && !P(s, -Math.round(th * 1.2))) return true;
+      return false;
     };
+    const tw2 = 2;
+    const t0 = vertical ? box.y0 : box.x0, t1 = vertical ? box.y1 : box.x1;
+    const add = (A, B, strong) => {
+      const len = B - A;
+      if (len < minLen) return;
+      // il numero di una quota sta circa a meta' della sua linea
+      const mid = (t0 + t1) / 2;
+      if (mid < A + 0.15 * len || mid > B - 0.15 * len) return;
+      const key = Math.round(len) + (strong ? 's' : 'w');
+      if (seen.has(key)) return;
+      seen.add(key);
+      cands.push({ len, a: A, b: B, L, strong });
+    };
+    // 1) fino alle linee perpendicolari (richiami o facce dei muri) piu' vicine al numero
+    const e2 = Math.max(5, Math.round(th * 1.1)); // piu' alta delle cifre, che la linea puo' attraversare
+    const crossing = s => { for (let q = -e2; q <= e2; q++) if (!near(s, q)) return false; return true; };
+    let lc = null, rc = null;
+    for (let s = Math.floor(t0) - 1; s >= a - 2; s--) if (crossing(s)) { lc = s; break; }
+    for (let s = Math.ceil(t1) + 1; s <= b + 2; s++) if (crossing(s)) { rc = s; break; }
+    if (dbg) dbg.push({ k, a, b, lc, rc, minLen });
+    if (lc != null && rc != null) add(lc, rc, true);
+    // 2) fino ai trattini che racchiudono il numero
     const ticks = [];
-    for (let s = a; s <= b; s++) if (crosses(s)) { if (!ticks.length || s - ticks[ticks.length - 1].e > 2) ticks.push({ s, e: s }); else ticks[ticks.length - 1].e = s; }
-    // un trattino e' stretto: i tratti larghi sono muri o testo, non segni di quota
+    for (let s = a; s <= b; s++) if ((s < t0 - 2 || s > t1 + 2) && crosses(s)) { if (!ticks.length || s - ticks[ticks.length - 1].e > 2) ticks.push({ s, e: s }); else ticks[ticks.length - 1].e = s; }
     const tk = ticks.filter(t => t.e - t.s <= tw2 * 4 + 2).map(t => (t.s + t.e) / 2);
-    // tratto tra i due trattini che racchiudono il centro del testo
     const left = tk.filter(t => t < c0 - 2).pop(), right = tk.find(t => t > c0 + 2);
-    if (left != null) a = left; if (right != null) b = right;
-    const len = b - a;
-    if (len < tw * 0.9) continue;
-    const score = len * (left != null && right != null ? 1.5 : 1) - Math.abs(k) * 0.5;
-    if (!best || score > best.score) best = { len, a, b, L, score, ticks: left != null && right != null };
+    if (left != null && right != null) add(left, right, true);
+    // 3) la linea intera (quote che attraversano muri interni: i richiami intermedi non contano)
+    add(a, b, false);
   }
-  if (!best) return null;
-  const seg = vertical ? { x0: best.L, y0: best.a, x1: best.L, y1: best.b } : { x0: best.a, y0: best.L, x1: best.b, y1: best.L };
-  return { len: best.len, seg, ticks: best.ticks };
+  if (!cands.length) return null;
+  cands.sort((p, q) => (q.strong - p.strong) || (q.len - p.len));
+  const seg = c => vertical ? { x0: c.L, y0: c.a, x1: c.L, y1: c.b } : { x0: c.a, y0: c.L, x1: c.b, y1: c.L };
+  for (const c of cands) c.seg = seg(c);
+  return { cands, len: cands[0].len, seg: cands[0].seg, ticks: cands[0].strong };
+}
+
+/**
+ * Prepara l'immagine per la lettura del testo: bianco e nero netto e senza le linee lunghe (muri,
+ * quote, richiami), che altrimenti si attaccano alle cifre e il lettore non le riconosce.
+ */
+function cleanForOcr(ctx, W, H, up) {
+  const id = ctx.getImageData(0, 0, W, H), d = id.data;
+  const blk = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) blk[i] = (d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114) < 190 ? 1 : 0;
+  const keep = blk.slice();
+  const LR = Math.round(13 * up); // tratti piu' lunghi di cosi' non sono cifre
+  for (let y = 0; y < H; y++) {
+    let a = -1;
+    for (let x = 0; x <= W; x++) {
+      const on = x < W && blk[y * W + x];
+      if (on && a < 0) a = x;
+      if (!on && a >= 0) { if (x - a > LR) for (let k = a; k < x; k++) keep[y * W + k] = 0; a = -1; }
+    }
+  }
+  for (let x = 0; x < W; x++) {
+    let a = -1;
+    for (let y = 0; y <= H; y++) {
+      const on = y < H && blk[y * W + x];
+      if (on && a < 0) a = y;
+      if (!on && a >= 0) { if (y - a > LR) for (let k = a; k < y; k++) keep[k * W + x] = 0; a = -1; }
+    }
+  }
+  for (let i = 0; i < W * H; i++) { const v = keep[i] ? 0 : 255; d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v; d[i * 4 + 3] = 255; }
+  ctx.putImageData(id, 0, 0);
 }
 
 /**
@@ -251,42 +334,74 @@ export async function ocrScale(src, map, onProgress) {
   const found = [];
   const img = await loadImage(src);
   // due passate: testo orizzontale e testo verticale (immagine ruotata di 90°)
+  // il testo delle planimetrie e' piccolo: si legge su una copia ingrandita
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const up = Math.min(3.5, Math.max(1, 4000 / Math.max(iw, ih)));
   for (const rot of [0, 1]) {
     const c = document.createElement('canvas');
-    c.width = rot ? img.naturalHeight : img.naturalWidth; c.height = rot ? img.naturalWidth : img.naturalHeight;
+    c.width = Math.round((rot ? ih : iw) * up); c.height = Math.round((rot ? iw : ih) * up);
     const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.imageSmoothingQuality = 'high';
     if (rot) { ctx.translate(c.width, 0); ctx.rotate(Math.PI / 2); }
+    ctx.scale(up, up);
     ctx.drawImage(img, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    cleanForOcr(ctx, c.width, c.height, up);
+    if (globalThis.__ocrDebug) globalThis.__ocrDebug.push(c.toDataURL('image/png'));
     if (onProgress) onProgress(rot ? 'quote verticali' : 'quote orizzontali', 0);
     const { data } = await wk.recognize(c);
+    if (globalThis.__ocrWords) globalThis.__ocrWords.push(...(data.words || []).map(x => x.text + '@' + Math.round(x.confidence) + '(' + Math.round(x.bbox.x0 / up) + ',' + Math.round(x.bbox.y0 / up) + ')'));
+    const words = [];
     for (const wd of data.words || []) {
       const cm = parseDim(wd.text);
-      if (cm == null || wd.confidence < 45) continue;
-      let b = wd.bbox;
+      if (cm == null) continue; // la confidenza non serve: con le sole cifre ammesse spesso vale 0 anche quando e' giusto
+      const bb = { x0: wd.bbox.x0 / up, x1: wd.bbox.x1 / up, y0: wd.bbox.y0 / up, y1: wd.bbox.y1 / up };
+      words.push({ text: wd.text, cm, bb, conf: wd.confidence });
+    }
+    // sigle di porte e finestre: due numeri uno sopra l'altro (larghezza/altezza), come "80/210"
+    for (const a of words) for (const b of words) {
+      if (a === b) continue;
+      const hgt = Math.max(a.bb.y1 - a.bb.y0, b.bb.y1 - b.bb.y0);
+      const wd = Math.max(a.bb.x1 - a.bb.x0, b.bb.x1 - b.bb.x0);
+      const dx = Math.abs((a.bb.x0 + a.bb.x1) / 2 - (b.bb.x0 + b.bb.x1) / 2);
+      const gap = b.bb.y0 - a.bb.y1;
+      if (dx < wd * 0.6 && gap > -hgt * 0.2 && gap < hgt * 1.1) { a.frac = b.frac = true; }
+    }
+    for (const wd of words) {
+      let b = wd.bb;
       // riporta il riquadro nelle coordinate dell'immagine originale (rotazione di 90° oraria)
-      if (rot) b = { x0: b.y0, x1: b.y1, y0: img.naturalHeight - b.x1, y1: img.naturalHeight - b.x0 };
-      found.push({ text: wd.text, cm, box: b, vertical: !!rot, conf: wd.confidence });
+      if (rot) b = { x0: b.y0, x1: b.y1, y0: ih - b.x1, y1: ih - b.x0 };
+      found.push({ text: wd.text, cm: wd.cm, box: b, vertical: !!rot, conf: wd.conf, frac: !!wd.frac });
     }
   }
   for (const f of found) {
+    if (f.frac) continue;
     const ln = lineForLabel(map, f.box, f.vertical);
-    if (ln) { f.px = ln.len; f.seg = ln.seg; f.k = f.cm / ln.len; f.ticks = ln.ticks; }
+    if (ln) { f.cands = ln.cands.map(c => ({ ...c, kk: f.cm / c.len })); f.px = ln.len; f.seg = ln.seg; f.k = f.cm / ln.len; f.ticks = ln.ticks; }
   }
-  const cand = found.filter(f => f.k);
-  // la scala su cui concordano piu' quote (entro il 4%)
+  // la scala su cui concordano piu' numeri, ognuno con la sua misura piu' vicina (entro il 6%)
+  const cand = found.filter(f => f.cands && f.cands.length);
   let best = null;
-  for (const f of cand) {
-    const near = cand.filter(g => Math.abs(g.k / f.k - 1) < 0.04);
-    const w = near.reduce((s, g) => s + (g.ticks ? 1.5 : 1), 0);
-    if (!best || w > best.w) best = { w, near };
+  for (const f of cand) for (const c of f.cands) {
+    const K = c.kk;
+    let score = 0;
+    const votes = [];
+    for (const g of cand) {
+      let bm = null;
+      for (const d of g.cands) { const e = Math.abs(d.kk / K - 1); if (e < 0.05 && (!bm || (d.strong && !bm.strong) || (d.strong === bm.strong && e < Math.abs(bm.kk / K - 1)))) bm = d; }
+      if (bm) { score += bm.strong ? 1 : 0.5; votes.push([g, bm]); }
+    }
+    if (votes.length >= 2 && (!best || score > best.score)) best = { score, votes };
   }
   let k = null;
+  const used = [];
   if (best) {
-    const ks = best.near.map(g => g.k).sort((a, b) => a - b);
+    const ks = best.votes.map(v => v[1].kk).sort((a, b) => a - b);
     k = ks[ks.length >> 1];
-    for (const g of best.near) g.ok = true;
+    for (const [g, c] of best.votes) { g.ok = true; g.k = c.kk; g.px = c.len; g.seg = c.seg; g.ticks = c.strong; used.push(g); }
   }
-  return { k, used: best ? best.near : [], all: found };
+  return { k, used, all: found };
 }
 
 // ---------- strumento foto per l'editor 2D ----------

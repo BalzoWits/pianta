@@ -4,11 +4,12 @@ import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js';
 import { View3D } from './view3d.js';
 import { CATALOG, CATEGORIES, newItem } from './furniture.js';
 import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb } from './materials.js';
-import { PhotoTool, fileToDataURL, warpPerspective, ocrScale } from './photo.js';
+import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js';
+import { skewAngle, rotateImage, detectWalls } from './detect.js';
 import * as MD from './models.js';
 import * as store from './store.js';
 import { Sync } from './cloud.js';
-import { sampleDoc } from './sample.js';
+import { sampleDoc, addOpeningAt } from './sample.js';
 
 const $ = s => document.querySelector(s);
 const QP = new URLSearchParams(location.search);
@@ -685,7 +686,7 @@ function panelPhoto() {
   if (photo.mode === 'persp') {
     panel.append(h('p', {}, 'Trascina i 4 cerchi sugli angoli della pianta (o di un rettangolo che nella realtà è dritto).'));
     panel.append(h('div', { class: 'row' }, btn('Annulla', () => { photo.setMode('move'); renderPanel(); setHint(); }), h('button', { type: 'button', class: 'primary', onclick: applyPerspective }, 'Applica')));
-  } else panel.append(h('div', { class: 'row' }, modeBtn('persp', 'Raddrizza prospettiva')));
+  } else panel.append(h('div', { class: 'row' }, btn('Raddrizza da sola', () => straightenPhoto(true)), modeBtn('persp', 'Raddrizza prospettiva')));
   panel.append(h('div', { class: 'row' },
     btn('↺ 90°', () => { bg.rot = (bg.rot + 270) % 360; commit('Ruota foto'); }),
     btn('↻ 90°', () => { bg.rot = (bg.rot + 90) % 360; commit('Ruota foto'); })));
@@ -700,12 +701,13 @@ function panelPhoto() {
       box.append(h('div', { class: 'callout' }, `Scala trovata con ${ocrResult.used.length} ${ocrResult.used.length === 1 ? 'quota' : 'quote coerenti'}: 1 px = ${ocrResult.k.toFixed(3).replace('.', ',')} cm. Le quote usate sono in verde sulla foto.`));
       box.append(h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', onclick: () => { photo.setScale(ocrResult.k, plan.toPlan(plan.W / 2, plan.H / 2)); bg.calibrated = true; ocrResult = null; photo.setMode('move'); commit('Scala dalle quote'); plan.fit(); toast('Foto in scala: ora ricalca i muri con «Pareti»'); } }, 'Usa questa scala'), btn('Ignora', () => { ocrResult = null; photo.setMode('move'); renderPanel(); })));
     } else box.append(h('div', { class: 'callout' }, 'Non ho trovato quote leggibili abbinate a una linea. Usa la taratura a mano: clicca gli estremi di una quota e scrivi la misura.'));
-    for (const f of ocrResult.all) box.append(h('div', { class: 'it' }, h('span', {}, `«${f.text}» → ${fmtCm(f.cm)} cm`), h('span', { class: f.ok ? 'ok' : 'no' }, f.ok ? '✓ usata' : f.k ? 'scartata' : 'senza linea')));
+    for (const f of ocrResult.all) box.append(h('div', { class: 'it' }, h('span', {}, `«${f.text}» → ${fmtCm(f.cm)} cm`), h('span', { class: f.ok ? 'ok' : 'no' }, f.ok ? '✓ usata' : f.frac ? 'porta/finestra' : f.k ? 'scartata' : 'senza linea')));
     panel.append(box);
   }
-  panel.append(h('h3', {}, '3 · Ricalca'));
+  panel.append(h('h3', {}, '3 · Pareti'));
+  panel.append(h('p', {}, 'Trova da sola le pareti orizzontali e verticali (disegnate con due linee o piene) e le porte nei muri interni. Poi controlla: cancella o correggi quelle sbagliate e completa le altre con «Pareti».'));
+  panel.append(h('div', { class: 'row' }, h('button', { type: 'button', class: bg.calibrated ? 'primary' : 'btn', onclick: runDetect }, 'Rileva le pareti'), btn('Disegna a mano', () => pickTool('wall'))));
   panel.append(checkField('Aggancia ai muri della foto', bg.snap, setVal(v => { bg.snap = v; }, 'Aggancio foto')));
-  panel.append(h('div', { class: 'row' }, h('button', { type: 'button', class: bg.calibrated ? 'primary' : 'btn', onclick: () => pickTool('wall') }, 'Disegna le pareti sopra')));
   panel.append(h('h3', {}, 'Foto'));
   panel.append(rangeField('Trasparenza', bg.opacity, 0.1, 1, 0.05, (v, fin) => { bg.opacity = v; plan.redraw(); if (fin) commit('Trasparenza'); }, v => Math.round(v * 100) + '%'));
   panel.append(checkField('Mostra la foto', bg.visible, setVal(v => { bg.visible = v; }, 'Mostra foto')));
@@ -721,12 +723,102 @@ $('#fileImg').addEventListener('change', async e => {
     const prev = app.doc.background;
     app.doc.background = { sid: G.newId('b'), src: r.src, w: r.w, h: r.h, cx: c.x, cy: c.y, k: prev ? prev.k : 1200 / Math.max(r.w, r.h), rot: 0, opacity: 0.6, visible: true, snap: true, calibrated: false };
     ocrResult = null;
+    busy('Raddrizzo la foto…');
+    await straightenPhoto(false);
     await photo.refresh();
     photo.setMode('move');
     commit('Foto');
     plan.fit();
   } catch (err) { toast(err.message); } finally { busy(null); }
 });
+/** Raddrizza la foto se il disegno e' un po' storto (fino a 6°). */
+async function straightenPhoto(manual) {
+  const bg = app.doc.background;
+  if (!bg) return;
+  try {
+    if (manual) busy('Misuro l’inclinazione…');
+    const map = await darkMap(bg.src);
+    const ang = skewAngle(map);
+    if (Math.abs(ang) < 0.1) { if (manual) toast('La foto è già dritta'); return; }
+    const r = await rotateImage(bg.src, ang, loadImage);
+    Object.assign(bg, { sid: G.newId('b'), src: r.src, w: r.w, h: r.h });
+    if (manual) { await photo.refresh(); commit('Raddrizza foto'); }
+    toast(`Foto raddrizzata di ${Math.abs(ang).toFixed(1).replace('.', ',')}°`);
+  } catch (e) { console.warn(e); if (manual) toast('Non riuscito: ' + e.message); } finally { if (manual) busy(null); }
+}
+
+function choose(title, text, options) {
+  return new Promise(resolve => {
+    let done = false;
+    modal(`<h2>${esc(title)}</h2><p class="note">${esc(text)}</p><div class="conflict">${options.map(([k, l, s]) => `<button class="btn" data-c="${k}"><b>${esc(l)}</b><small>${esc(s)}</small></button>`).join('')}</div>`, (el, close) => {
+      el.addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (b) { done = true; close(); resolve(b.dataset.c); } });
+    });
+    onModalClosed(() => { if (!done) resolve(null); });
+  });
+}
+
+/** Collega gli estremi liberi al muro o all'estremo piu' vicino (entro meta' spessore + 8 cm). */
+function weldLooseEnds(d) {
+  for (let pass = 0; pass < 2; pass++) {
+    for (const n of d.nodes.slice()) {
+      if (!d.nodes.includes(n) || G.degree(d, n.id) !== 1) continue;
+      const own = d.walls.find(w => w.a === n.id || w.b === n.id);
+      let best = null;
+      for (const m of d.nodes) {
+        if (m === n) continue;
+        const dd = G.dist(m, n);
+        if (dd <= own.thickness / 2 + 15 && (!best || dd < best.d) && !d.walls.some(w => (w.a === n.id && w.b === m.id) || (w.b === n.id && w.a === m.id))) best = { d: dd, p: { x: m.x, y: m.y } };
+      }
+      for (const w of d.walls) {
+        if (w === own || w.a === n.id || w.b === n.id) continue;
+        const pr = G.projSeg(n, G.nodeById(d, w.a), G.nodeById(d, w.b));
+        if (pr.d <= w.thickness / 2 + 8 && (!best || pr.d < best.d - 2)) best = { d: pr.d, p: pr.p };
+      }
+      if (!best) continue;
+      n.x = best.p.x; n.y = best.p.y;
+      plan._mergeNode(n);
+    }
+  }
+}
+
+/** Pareti (e porte) riconosciute nella foto, aggiunte come un'unica modifica annullabile. */
+async function runDetect() {
+  const d = app.doc, bg = d.background;
+  if (!bg) return;
+  if (!bg.calibrated) {
+    const c = await choose('La foto non è ancora in scala', 'Le pareti prenderebbero misure sbagliate. Prima leggi le quote o fai la taratura a mano.', [['no', 'Prima metto in scala', 'torno al passo 2'], ['si', 'Rileva lo stesso', 'le misure andranno corrette']]);
+    if (c !== 'si') return;
+  }
+  let mode = 'add';
+  if (d.walls.length) {
+    mode = await choose('Ci sono già delle pareti', 'Cosa faccio con quelle disegnate finora?', [['replace', 'Sostituiscile', 'tolgo pareti, porte e finestre attuali'], ['add', 'Aggiungi le nuove', 'tengo quelle che ci sono']]);
+    if (!mode) return;
+  }
+  try {
+    busy('Cerco le pareti…');
+    await new Promise(r => setTimeout(r, 30));
+    if (!photo.map) photo.map = await darkMap(bg.src);
+    const res = detectWalls(photo.map, bg.k);
+    if (!res.walls.length) { toast('Non ho trovato pareti: prova a disegnarle con «Pareti»'); return; }
+    if (mode === 'replace') { d.walls = []; d.nodes = []; d.openings = []; }
+    for (const w of res.walls) {
+      const a = photo.toPlan(w.x0, w.y0), b = photo.toPlan(w.x1, w.y1);
+      G.addWall(d, a, b, { thickness: Math.max(5, Math.round(w.t * bg.k)) });
+    }
+    weldLooseEnds(d);
+    G.cleanup(d);
+    let nd = 0;
+    for (const o of res.doors) {
+      const p = photo.toPlan(o.x, o.y);
+      if (addOpeningAt(d, p, 'door', { width: Math.max(60, Math.min(120, o.width)) })) nd++;
+    }
+    curTool = 'select'; plan.setTool('select'); photo.setMode(null);
+    commit('Pareti dalla foto');
+    renderTools(); setHint();
+    toast(`Trovate ${res.walls.length} pareti${nd ? ' e ' + nd + ' porte' : ''}: controlla e correggi (Ctrl+Z per annullare tutto)`);
+  } catch (e) { console.error(e); toast('Rilevamento non riuscito: ' + e.message); } finally { busy(null); }
+}
+
 async function applyPerspective() {
   const bg = app.doc.background;
   try {
@@ -1147,5 +1239,5 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) persi
   const v = QP.get('vista');
   if (v === '3d' || v === 'render') setView(v);
   if (QP.get('cammina') !== null) { view.setMode('walk'); updateWalkpad(); renderTools(); }
-  window.__pianta = { app, plan, view, setView, newProject, openProject, sampleDoc, pickTool, commit, setSel };
+  window.__pianta = { app, plan, view, setView, newProject, openProject, sampleDoc, pickTool, commit, setSel, runDetect };
 })();
