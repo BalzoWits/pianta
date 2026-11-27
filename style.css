@@ -148,14 +148,6 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .conflict .btn { flex-direction: column; align-items: flex-start; }
 .conflict small { color: var(--muted); }
 .filemenu .btn { text-align: left; }
-.renderbar .ai { background: linear-gradient(135deg, #eef3ff, #f7ecff); border-color: #c9c2f0; }
-.aiprev { width: 100%; border-radius: 8px; margin: 6px 0; max-height: 36vh; object-fit: contain; background: #eee; }
-.field.col { flex-direction: column; align-items: stretch; gap: 4px; }
-.field.col textarea { width: 100%; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 8px; resize: vertical; }
-.aicmp { position: relative; }
-.aicmp img { width: 100%; border-radius: 8px; display: block; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-.aitag { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,0.6); color: #fff; font-size: 12px; padding: 3px 8px; border-radius: 6px; }
-.modal-box .field select { max-width: 60%; }
 .acct { display: flex; gap: 10px; align-items: center; }
 .acct img { width: 40px; height: 40px; border-radius: 50%; }
 .acct small { display: block; color: var(--muted); }

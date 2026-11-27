@@ -1,8 +1,8 @@
 // Editor della pianta in 2D su canvas: disegno delle pareti con agganci e quote, porte e finestre,
 // mobili, stanze, quote libere e foto di sfondo. Funziona con mouse, tastiera e touch (iPad).
-import * as G from './geom.js?v=mwz29b10';
-import { CATALOG } from './furniture.js?v=mwz29b10';
-import { FLOORS, floorTint } from './materials.js?v=mwz29b10';
+import * as G from './geom.js?v=mwz2r4zd';
+import { CATALOG } from './furniture.js?v=mwz2r4zd';
+import { FLOORS, floorTint } from './materials.js?v=mwz2r4zd';
 
 const COL = {
   bg: '#f6f5f2', grid: '#e6e3dc', grid2: '#d6d2c9', wall: '#2f343b', wallSel: '#2f7bf6', node: '#2f7bf6',

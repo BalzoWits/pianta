@@ -1,18 +1,18 @@
 // Pianta: collega editor 2D, vista 3D, render, pannelli, progetti e salvataggio.
-import * as G from './geom.js?v=mwz29b10';
-import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js?v=mwz29b10';
-import { View3D } from './view3d.js?v=mwz29b10';
-import { buildHouse } from './house3d.js?v=mwz29b10';
-import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js?v=mwz29b10';
-import { LIGHT_PRESETS, resolveLight, fmtTime } from './lighting.js?v=mwz29b10';
-import { itemThumb } from './thumbs.js?v=mwz29b10';
-import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS, FINISHES, finishCss } from './materials.js?v=mwz29b10';
-import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js?v=mwz29b10';
-import { skewAngle, rotateImage, detectWalls } from './detect.js?v=mwz29b10';
-import * as MD from './models.js?v=mwz29b10';
-import * as store from './store.js?v=mwz29b10';
-import { Sync } from './cloud.js?v=mwz29b10';
-import { sampleDoc, addOpeningAt } from './sample.js?v=mwz29b10';
+import * as G from './geom.js?v=mwz2r4zd';
+import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js?v=mwz2r4zd';
+import { View3D } from './view3d.js?v=mwz2r4zd';
+import { buildHouse } from './house3d.js?v=mwz2r4zd';
+import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js?v=mwz2r4zd';
+import { LIGHT_PRESETS, resolveLight, fmtTime } from './lighting.js?v=mwz2r4zd';
+import { itemThumb } from './thumbs.js?v=mwz2r4zd';
+import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS, FINISHES, finishCss } from './materials.js?v=mwz2r4zd';
+import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js?v=mwz2r4zd';
+import { skewAngle, rotateImage, detectWalls } from './detect.js?v=mwz2r4zd';
+import * as MD from './models.js?v=mwz2r4zd';
+import * as store from './store.js?v=mwz2r4zd';
+import { Sync } from './cloud.js?v=mwz2r4zd';
+import { sampleDoc, addOpeningAt } from './sample.js?v=mwz2r4zd';
 
 const $ = s => document.querySelector(s);
 const QP = new URLSearchParams(location.search);
@@ -323,79 +323,6 @@ $('#rSave').addEventListener('click', async () => {
   a.href = url; a.download = name; a.click();
   toast('Immagine salvata nella cartella Download');
 });
-// ---------- foto realistica con Gemini ----------
-let aiLast = null; // { src, out }
-$('#rAi').addEventListener('click', () => openGemini());
-async function openGemini(again) {
-  const AI = await import('./gemini.js?v=mwz29b10');
-  let src = again && aiLast ? aiLast.src : null;
-  if (!src) { busy('Preparo l’immagine…'); try { src = await AI.toJpeg(view.snapshot(), 1536); } finally { busy(null); } }
-  let key = AI.getKey();
-  const notes0 = lsGet('pianta.aiNotes') || '';
-  const creative0 = lsGet('pianta.aiCreative') === '1';
-  modal(`<h2>✨ Foto realistica con Gemini</h2>
-    <p class="note">Gemini trasforma questa immagine in una foto realistica, tenendo uguali stanza, inquadratura e arredi. Funziona con ogni stile di render (anche «Veloce»).</p>
-    <img src="${src.url}" alt="" class="aiprev">
-    <label class="field col"><span>Indicazioni in più (facoltative)</span><textarea id="aiNotes" rows="2" placeholder="es. luce calda del tardo pomeriggio, lenzuola di lino, una pianta vicino alla finestra">${esc(notes0)}</textarea></label>
-    <div class="row"><button type="button" class="btn ${creative0 ? '' : 'on'}" data-cr="0">Fedele al render</button><button type="button" class="btn ${creative0 ? 'on' : ''}" data-cr="1">Più libero (aggiunge dettagli)</button></div>
-    <div id="aiKeyBox" ${key ? 'hidden' : ''}>
-      <p class="note">Serve una <b>chiave API di Google AI Studio</b> (la crei con il tuo account Google su <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>). Resta salvata solo in questo browser. La generazione di immagini con l’API può essere a pagamento secondo il tuo piano Google.</p>
-      <input type="password" id="aiKey" class="name-in" placeholder="incolla qui la chiave API" autocomplete="off">
-    </div>
-    <label class="field"><span>Modello</span><select id="aiModel"><option value="${esc(AI.getModel() || AI.DEFAULT_MODEL)}">${esc(AI.getModel() || AI.DEFAULT_MODEL)}</option></select></label>
-    <footer><button class="btn" data-key>${key ? 'Cambia chiave' : ''}</button><span class="grow"></span><button class="btn" data-close>Annulla</button><button class="primary" data-go>Genera</button></footer>`, (el, close) => {
-    let creative = creative0;
-    el.querySelectorAll('[data-cr]').forEach(b => b.addEventListener('click', () => { creative = b.dataset.cr === '1'; el.querySelectorAll('[data-cr]').forEach(x => x.classList.toggle('on', x === b)); }));
-    const kb = el.querySelector('[data-key]');
-    if (!key) kb.remove(); else kb.addEventListener('click', () => { el.querySelector('#aiKeyBox').hidden = false; kb.remove(); });
-    const sel = el.querySelector('#aiModel');
-    const fillModels = async k => {
-      try {
-        const ms = await AI.listImageModels(k);
-        if (!ms.length) return;
-        const cur = AI.getModel() || (ms.find(m => m.id === AI.DEFAULT_MODEL) ? AI.DEFAULT_MODEL : ms[0].id);
-        sel.innerHTML = ms.map(m => `<option value="${esc(m.id)}">${esc(m.name)} (${esc(m.id)})</option>`).join('');
-        sel.value = ms.some(m => m.id === cur) ? cur : ms[0].id;
-      } catch (e) { /* si tiene il modello predefinito */ }
-    };
-    if (key) fillModels(key);
-    el.querySelector('[data-go]').addEventListener('click', async () => {
-      const kIn = el.querySelector('#aiKey');
-      if (kIn && kIn.value.trim()) { key = kIn.value.trim(); AI.setKey(key); }
-      if (!key) { toast('Incolla la chiave API di Google AI Studio'); return; }
-      const notes = el.querySelector('#aiNotes').value.trim();
-      lsSet('pianta.aiNotes', notes || null); lsSet('pianta.aiCreative', creative ? '1' : null);
-      const model = sel.value; AI.setModel(model);
-      close();
-      busy('Gemini sta creando la foto… (di solito 10–60 secondi)');
-      try {
-        const out = await AI.photoreal({ key, model, image: src, notes, creative });
-        aiLast = { src, out };
-        showGeminiResult();
-      } catch (e) {
-        console.error(e);
-        if (/chiave API non valida/.test(e.message)) AI.setKey('');
-        toast('Gemini: ' + e.message);
-      } finally { busy(null); }
-    });
-  });
-}
-function showGeminiResult() {
-  const { src, out } = aiLast;
-  modal(`<h2>✨ Foto realistica</h2>
-    <div class="aicmp"><img src="${out}" alt="" id="aiOut"><span class="aitag" id="aiTag">Gemini</span></div>
-    <p class="note">Tieni premuto sull’immagine per vedere il render di partenza.</p>
-    <footer><button class="btn" data-again>Riprova</button><span class="grow"></span><button class="btn" data-close>Chiudi</button><button class="primary" data-save>Salva immagine</button></footer>`, (el, close) => {
-    const im = el.querySelector('#aiOut'), tag = el.querySelector('#aiTag');
-    const show = b => { im.src = b ? src.url : out; tag.textContent = b ? 'Render' : 'Gemini'; };
-    im.addEventListener('pointerdown', e => { e.preventDefault(); show(true); });
-    ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => im.addEventListener(t, () => show(false)));
-    im.addEventListener('contextmenu', e => e.preventDefault());
-    el.querySelector('[data-save]').addEventListener('click', async () => { const b = await (await fetch(out)).blob(); await saveBlob(b, fileBase() + ' - foto realistica.' + (b.type.includes('jpeg') ? 'jpg' : 'png')); });
-    el.querySelector('[data-again]').addEventListener('click', () => { close(); openGemini(true); });
-  });
-}
-
 for (const b of document.querySelectorAll('#walkpad button')) {
   const k = b.dataset.k;
   const on = e => { e.preventDefault(); view.hold(k, true); };

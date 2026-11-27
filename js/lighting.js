@@ -2,9 +2,9 @@
 // riempimento automatica nella stanza in cui si trova la camera. Cosi' tutti i motori danno la stessa immagine.
 import * as THREE from 'three';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
-import * as G from './geom.js?v=mwz29b10';
-import { buildHouse } from './house3d.js?v=mwz29b10';
-import { GLASS } from './materials.js?v=mwz29b10';
+import * as G from './geom.js?v=mwz2r4zd';
+import { buildHouse } from './house3d.js?v=mwz2r4zd';
+import { GLASS } from './materials.js?v=mwz2r4zd';
 
 const M = 0.01;
 let rectLibReady = false;
