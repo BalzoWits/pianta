@@ -22,6 +22,8 @@ const app = {
   sel: null,
   view: '2d',
   setSel, commit, changed, toolDone, onTyped, editLength, selectRoomFace, placeItemAt, previewItem,
+  northStart: () => { $('#hint').textContent = 'Muovi il puntatore verso il nord e clicca sulla mappa per fissarlo · Esc per annullare'; },
+  northDone: () => { setHint(); renderPanel(); view.setLight({}); },
   askCalibration, modelGeos, snapItem: (it, p) => plan.snapItemToWall(it, p), snapItems: it => plan.snapItemToItems(it, 8), selectRoomAt, selectedRoomCenter, walkStart,
 };
 let project = null; // { id, name, rev }
@@ -531,8 +533,9 @@ function panelHouse() {
   panel.append(checkField('Mostra le quote', S.showDims, setVal(v => { S.showDims = v; }, 'Quote')));
   panel.append(checkField('Mostra le superfici', S.showAreas, setVal(v => { S.showAreas = v; }, 'Superfici')));
   panel.append(h('h3', {}, 'Orientamento'));
+  panel.append(h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => { if (app.view !== '2d') setView('2d'); plan.startNorth(); } }, h('span', { class: 'compassico', style: `transform: rotate(${S.north || 0}deg)` }, '➤'), ' Indica il nord sulla mappa')));
   panel.append(rangeField('Direzione del nord', S.north || 0, 0, 359, 1, (v, fin) => { S.north = v; plan.redraw(); if (fin) { commit('Nord'); view.setLight({}); } }, v => v + '°'));
-  panel.append(h('p', {}, 'La rosa dei venti in alto a destra nella pianta mostra il nord: serve per la posizione del sole nel render.'));
+  panel.append(h('p', {}, 'Puoi anche cliccare la rosa dei venti in alto a destra nella pianta: l’ago segue il mouse, clicchi dove sta il nord. Serve per la posizione del sole nel render.'));
   const lat = h('select', {}, ...[['46.5', 'Nord Italia (Alpi)'], ['45.5', 'Nord Italia'], ['43.8', 'Centro Italia'], ['41.5', 'Lazio, Campania'], ['39', 'Sud Italia'], ['37.5', 'Sicilia']].map(([v, n]) => h('option', { value: v }, n)));
   lat.value = String([46.5, 45.5, 43.8, 41.5, 39, 37.5].reduce((a, b) => Math.abs(b - (S.lat ?? 45)) < Math.abs(a - (S.lat ?? 45)) ? b : a));
   lat.addEventListener('change', () => { S.lat = +lat.value; commit('Latitudine'); view.setLight({}); });

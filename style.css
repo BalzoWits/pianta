@@ -122,6 +122,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 6px 0; }
 .presets .btn { padding: 7px 4px; font-size: 13px; }
 .engine { font-size: 12px; }
+.compassico { display: inline-block; color: #c92a2a; transform-origin: 50% 50%; margin-right: 4px; }
+.compassico { rotate: -90deg; }
 .kbd { font-family: ui-monospace, monospace; font-size: 11px; background: #f0eee9; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .ocr { font-size: 12.5px; }
 .ocr .it { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed var(--line); }

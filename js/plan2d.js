@@ -361,6 +361,9 @@ export class Plan2D {
     }
     if (this.pointers.size > 2) return;
     const p = this.toPlan(sx, sy);
+    const cc = this._compassCenter();
+    if (this.northMode) { this._setNorth(sx, sy); this.northMode = null; this.app.commit('Nord'); this.app.northDone && this.app.northDone(); this.redraw(); return; }
+    if (Math.hypot(sx - cc.x, sy - cc.y) < 28) { this.startNorth(); return; }
     if (e.button === 1 || e.button === 2 || this.spaceDown || this.tool === 'pan') {
       this.drag = { type: 'pan', sx, sy, ox: this.view.ox, oy: this.view.oy };
       this.cv.style.cursor = 'grabbing';
@@ -379,6 +382,7 @@ export class Plan2D {
 
   _move(e) {
     const { sx, sy } = this._pt(e);
+    if (this.northMode) { this.mouse = this.toPlan(sx, sy); this._setNorth(sx, sy); this.redraw(); return; }
     if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { sx, sy });
     if (this.pinch && this.pointers.size === 2) {
       const [a, b] = [...this.pointers.values()];
@@ -658,6 +662,7 @@ export class Plan2D {
       if (e.key === 'Enter') { if (this.typed) this.applyTypedLength(parseFloat(this.typed.replace(',', '.'))); else this.finishWall(); return true; }
       if (e.key === 'Escape') { this.finishWall(); return true; }
     }
+    if (e.key === 'Escape' && this.northMode) { this.cancelNorth(); return true; }
     if (e.key === 'Escape' && (this.draft || this.tool !== 'select')) { this.draft = null; this.app.toolDone(); return true; }
     return false;
   }
@@ -795,11 +800,29 @@ export class Plan2D {
     this._scaleBar();
     this._compass();
   }
+  _compassCenter() { return { x: this.W - 34, y: 34 }; }
+  /** Scelta del nord: l'ago segue il puntatore, un clic lo fissa. Esc annulla. */
+  startNorth() { this.northMode = { old: this.doc.settings.north || 0 }; this.app.northStart && this.app.northStart(); this.redraw(); }
+  cancelNorth() { if (!this.northMode) return; this.doc.settings.north = this.northMode.old; this.northMode = null; this.app.northDone && this.app.northDone(); this.redraw(); }
+  _setNorth(sx, sy) {
+    const c = this._compassCenter();
+    if (Math.hypot(sx - c.x, sy - c.y) < 4) return;
+    let a = Math.atan2(sx - c.x, -(sy - c.y)) * 180 / Math.PI;
+    a = Math.round((a + 360) % 360);
+    this.doc.settings.north = a;
+  }
   _compass() {
-    const ctx = this.ctx, a = (this.doc.settings.north || 0) * Math.PI / 180, cx = this.W - 34, cy = 34, r = 20;
+    const ctx = this.ctx, a = (this.doc.settings.north || 0) * Math.PI / 180, { x: cx, y: cy } = this._compassCenter(), r = 20;
+    const active = !!this.northMode;
+    if (active && this.mouse) {
+      // linea verso il puntatore
+      const m = this.toScreen(this.mouse);
+      ctx.save(); ctx.strokeStyle = '#c92a2a'; ctx.setLineDash([6, 5]); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(m.x, m.y); ctx.stroke(); ctx.restore();
+    }
     ctx.save(); ctx.translate(cx, cy);
-    ctx.beginPath(); ctx.arc(0, 0, r + 4, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
-    ctx.strokeStyle = '#c9c5bc'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, r + 4, 0, Math.PI * 2); ctx.fillStyle = active ? '#fff1f1' : 'rgba(255,255,255,0.85)'; ctx.fill();
+    ctx.strokeStyle = active ? '#c92a2a' : '#c9c5bc'; ctx.lineWidth = active ? 2 : 1; ctx.stroke();
     ctx.rotate(a);
     ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(6, 2); ctx.lineTo(0, -2); ctx.lineTo(-6, 2); ctx.closePath(); ctx.fillStyle = '#c92a2a'; ctx.fill();
     ctx.beginPath(); ctx.moveTo(0, r); ctx.lineTo(6, -2); ctx.lineTo(0, 2); ctx.lineTo(-6, -2); ctx.closePath(); ctx.fillStyle = '#9aa0a8'; ctx.fill();
