@@ -26,6 +26,23 @@ function sphere(g, r, x, y, z, mat, sy = 1) {
   g.add(m);
   return m;
 }
+// paralume in tessuto: quando la lampada e' accesa lascia passare un po' di luce (emissivo tenue)
+function glowShade(color) {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide, emissive: 0xffd9a8, emissiveIntensity: 0 });
+}
+// lampadina: materiale proprio (si accende e si spegne per oggetto), intensita' di base in userData.bulb
+function bulb(g, r, x, y, z, base = 3) {
+  const m = sphere(g, r, x, y, z, new THREE.MeshStandardMaterial({ color: 0xfff8e8, emissive: 0xffe2b0, emissiveIntensity: base, roughness: 0.4 }));
+  m.userData.bulb = base;
+  m.castShadow = false;
+  return m;
+}
+function shade(g, rTop, rBot, h, x, y, z, color) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop * M, rBot * M, h * M, 32, 1, true), glowShade(color));
+  m.position.set(x * M, (y + h / 2) * M, z * M);
+  g.add(m);
+  return m;
+}
 const legs4 = (g, w, d, h, inset, s, mat, round = false) => {
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
     const x = sx * (w / 2 - inset), z = sz * (d / 2 - inset);
@@ -278,19 +295,51 @@ export const CATALOG = {
     build(g, it) {
       const r = it.w / 2;
       cyl(g, 0.4, 40, 0, it.h, 0, solid('#222'));
-      const shade = cyl(g, r * 0.5, it.h * 0.8, 0, 0, 0, solid(it.color, { rough: 0.7, side: THREE.DoubleSide }), r, 32);
-      shade.geometry = new THREE.CylinderGeometry(r * 0.45 * M, r * M, it.h * 0.8 * M, 32, 1, true);
-      sphere(g, 5, 0, 6, 0, solid('#fff8e8', { emissive: '#ffe2b0', ei: 3 }));
+      const sh = cyl(g, r * 0.5, it.h * 0.8, 0, 0, 0, glowShade(it.color), r, 32);
+      sh.geometry = new THREE.CylinderGeometry(r * 0.45 * M, r * M, it.h * 0.8 * M, 32, 1, true);
+      sh.userData.bulb = 0.25;
+      bulb(g, 5, 0, 6, 0);
     },
     draw(ctx, it) { circ(ctx, 0, 0, it.w / 2); ctx.beginPath(); ctx.moveTo(-it.w / 2, 0); ctx.lineTo(it.w / 2, 0); ctx.moveTo(0, -it.w / 2); ctx.lineTo(0, it.w / 2); ctx.stroke(); },
+  },
+  faretto: {
+    name: 'Faretto a incasso', cat: 'Luci', w: 10, d: 10, h: 2, color: '#f2efe9', light: 'flush', round: true,
+    build(g, it) {
+      const r = it.w / 2;
+      cyl(g, r, 1.5, 0, 0.5, 0, solid(it.color, { rough: 0.5 }), r, 24);
+      const disk = cyl(g, r * 0.7, 0.6, 0, 0, 0, new THREE.MeshStandardMaterial({ color: 0xfff8e8, emissive: 0xffe2b0, emissiveIntensity: 3 }), r * 0.7, 24);
+      disk.userData.bulb = 3; disk.castShadow = false;
+    },
+    draw(ctx, it) { circ(ctx, 0, 0, it.w / 2); circ(ctx, 0, 0, it.w / 4); },
+  },
+  applique: {
+    name: 'Applique (da parete)', cat: 'Luci', w: 30, d: 16, h: 24, elev: 180, color: '#f2efe9', light: 'wall',
+    build(g, it) {
+      box(g, 10, it.h * 0.6, 2, 0, it.h * 0.2, -it.d / 2 + 1, solid('#2b2b2b'));
+      box(g, 2, 2, it.d * 0.5, 0, it.h * 0.45, -it.d / 4, solid('#2b2b2b'));
+      shade(g, it.w * 0.32, it.w * 0.45, it.h * 0.7, 0, it.h * 0.15, it.d * 0.1, it.color).userData.bulb = 0.25;
+      bulb(g, 3.5, 0, it.h * 0.45, it.d * 0.1);
+    },
+    draw(ctx, it) { rect(ctx, -it.w / 2, -it.d / 2, it.w, 3); ell(ctx, 0, it.d * 0.1, it.w * 0.45, it.d * 0.4); },
+  },
+  lampadaTavolo: {
+    name: 'Lampada da tavolo', cat: 'Luci', w: 28, d: 28, h: 48, elev: 50, color: '#f2efe9', light: 'table', round: true,
+    build(g, it) {
+      cyl(g, it.w * 0.3, 2, 0, 0, 0, solid('#c9a274', { rough: 0.5 }));
+      cyl(g, 1, it.h * 0.55, 0, 2, 0, solid('#2b2b2b'));
+      shade(g, it.w * 0.32, it.w / 2, it.h * 0.42, 0, it.h * 0.55, 0, it.color).userData.bulb = 0.25;
+      bulb(g, 3.5, 0, it.h * 0.68, 0);
+    },
+    draw(ctx, it) { circ(ctx, 0, 0, it.w / 2); circ(ctx, 0, 0, it.w * 0.3); },
   },
   lampadaTerra: {
     name: 'Lampada da terra', cat: 'Luci', w: 40, d: 40, h: 170, color: '#f2efe9', light: 'floor',
     build(g, it) {
       cyl(g, 14, 2, 0, 0, 0, solid(METAL)); cyl(g, 1, it.h - 30, 0, 2, 0, solid(METAL));
-      const sh = new THREE.Mesh(new THREE.CylinderGeometry(it.w / 2 * 0.7 * M, it.w / 2 * M, 30 * M, 32, 1, true), solid(it.color, { rough: 0.8, side: THREE.DoubleSide }));
+      const sh = new THREE.Mesh(new THREE.CylinderGeometry(it.w / 2 * 0.7 * M, it.w / 2 * M, 30 * M, 32, 1, true), glowShade(it.color));
       sh.position.y = (it.h - 15) * M; g.add(sh);
-      sphere(g, 5, 0, it.h - 18, 0, solid('#fff8e8', { emissive: '#ffe2b0', ei: 3 }));
+      sh.userData.bulb = 0.25;
+      bulb(g, 5, 0, it.h - 18, 0);
     },
     draw(ctx, it) { circ(ctx, 0, 0, it.w / 2); circ(ctx, 0, 0, 3); },
   },
@@ -339,29 +388,42 @@ export const CATEGORIES = ['Soggiorno', 'Pranzo', 'Cucina', 'Camera', 'Bagno', '
 
 export function newItem(kind, x, y) {
   const c = CATALOG[kind];
-  return { id: 'i' + Math.random().toString(36).slice(2, 9), kind, x, y, rot: 0, w: c.w, d: c.d, h: c.h, elev: c.elev ?? 0, color: c.color, color2: c.color2 || null };
+  const it = { id: 'i' + Math.random().toString(36).slice(2, 9), kind, x, y, rot: 0, w: c.w, d: c.d, h: c.h, elev: c.elev ?? 0, color: c.color, color2: c.color2 || null };
+  if (c.light) Object.assign(it, { on: true, power: 1, lightColor: '#ffd9a8' });
+  return it;
 }
+/** L'oggetto fa luce? (lampade del catalogo o modelli importati segnati come luminosi) */
+export const isLamp = it => !!((CATALOG[it.kind] && CATALOG[it.kind].light) || it.glow);
 
 /** Gruppo 3D di un mobile, gia' posizionato. models: mappa id -> geometria per i modelli importati. */
 export function buildItem(it, wallHeight, modelGeo) {
   const c = CATALOG[it.kind] || CATALOG.scatola;
   const g = new THREE.Group();
   if (it.kind === 'modello' && modelGeo) {
-    const m = new THREE.Mesh(modelGeo, modelGeo.hasAttribute('color') ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }) : solid(it.color, { rough: 0.7 }));
+    // colori del file oppure una tinta unica scelta dall'utente; se e' una lampada, luminoso
+    const vc = modelGeo.hasAttribute('color') && !it.paint;
+    const mat = it.glow ? new THREE.MeshStandardMaterial({ vertexColors: vc, color: vc ? 0xffffff : it.color, roughness: 0.6, emissive: 0xffe2b0, emissiveIntensity: 1 })
+      : vc ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }) : solid(it.color, { rough: 0.7 });
+    const m = new THREE.Mesh(modelGeo, mat);
     m.scale.set(it.w * M / 2, it.h * M / 2, it.d * M / 2);
     m.position.y = it.h * M / 2;
+    if (it.glow) { m.userData.bulb = 0.8; m.castShadow = false; }
     g.add(m);
   } else c.build(g, it);
-  const elev = c.light === 'ceiling' ? wallHeight - it.h - 40 : (it.elev || 0);
+  const elev = c.light === 'ceiling' ? wallHeight - it.h - 40 : c.light === 'flush' ? wallHeight - it.h : (it.elev || 0);
   g.position.set(it.x * M, elev * M, it.y * M);
   g.rotation.y = -it.rot * Math.PI / 180;
   g.userData.item = it.id;
   g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.userData.item = it.id; } });
-  if (c.light) {
+  if (c.light || it.glow) {
     const L = new THREE.PointLight(0xffd9a8, 0, 0, 2);
-    L.position.y = (c.light === 'ceiling' ? 6 : it.h - 18) * M;
+    const pos = { ceiling: [6, 0], flush: [-4, 0], floor: [it.h - 18, 0], wall: [it.h * 0.45, it.d * 0.25], table: [it.h * 0.68, 0] }[c.light] || [it.h * 0.6, 0];
+    L.position.set(0, pos[0] * M, pos[1] * M);
     L.userData.lamp = true;
+    L.userData.base = c.light === 'flush' ? 1 : 1.4;
     g.add(L);
   }
+  // riferimento all'oggetto per accendere e spegnere (lighting.js)
+  if (c.light || it.glow) g.traverse(o => { if (o.isLight || o.userData.bulb) o.userData.lampItem = it; });
   return g;
 }

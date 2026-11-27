@@ -2,7 +2,8 @@
 import * as G from './geom.js';
 import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js';
 import { View3D } from './view3d.js';
-import { CATALOG, CATEGORIES, newItem } from './furniture.js';
+import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js';
+import { LIGHT_PRESETS, resolveLight } from './lighting.js';
 import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS } from './materials.js';
 import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js';
 import { skewAngle, rotateImage, detectWalls } from './detect.js';
@@ -198,7 +199,8 @@ function renderTools() {
     B('fit', 'Inquadra', 'Inquadra tutta la casa', false, () => { view.frame(); renderTools(); updateWalkpad(); });
     t.appendChild(Object.assign(document.createElement('i'), { className: 'sep' }));
     B('low', 'Pareti basse', 'Pareti tagliate a 110 cm per vedere dentro', view.lowWalls, () => { view.lowWalls = !view.lowWalls; view.invalidate(); renderTools(); });
-    B(view.light.mode === 'day' ? 'sun' : 'moon', view.light.mode === 'day' ? 'Giorno' : 'Sera', 'Luce del giorno o lampade accese', false, () => { view.setLight({ mode: view.light.mode === 'day' ? 'night' : 'day' }); renderTools(); renderPanel(); });
+    const night = view.light.preset === 'sera';
+    B(night ? 'moon' : 'sun', night ? 'Sera' : 'Giorno', 'Luce del giorno o sera con le lampade (altre luci nel pannello)', false, () => { view.light.preset = night ? 'auto' : 'sera'; view.setLight({}); renderTools(); renderPanel(); });
     t.appendChild(Object.assign(document.createElement('i'), { className: 'sep' }));
     B('furniture', 'Arredi', 'Aggiungi un arredo', false, () => { setSel(null); panelMode = 'catalog'; renderPanel(); });
   }
@@ -233,9 +235,10 @@ function setHint() {
   };
   let h = '';
   if (app.view === '2d') h = H[curTool] || '';
-  else if (app.view === '3d') h = view.mode === 'walk' ? 'Trascina per guardarti attorno · WASD o frecce per camminare · Maiusc per correre' : 'Trascina per girare · tasto destro o due dita per spostare · clic su un arredo per selezionarlo, poi trascinalo';
+  else if (app.view === '3d') h = view.mode === 'walk' ? 'WASD o frecce per muoverti · clic e muovi il mouse per guardarti attorno (Esc libera il mouse) · Q/E per girare · Maiusc per correre' : 'Trascina per girare · tasto destro o due dita per spostare · clic su un arredo per selezionarlo, poi trascinalo';
   else h = 'Il render migliora a ogni passaggio · muovi la vista o cammina e riparte da capo';
-  $('#hint').textContent = (window.matchMedia('(pointer: coarse)').matches ? h.replace(/ · Alt = senza agganci| · Maiusc per correre|WASD o frecce/g, s => s.includes('WASD') ? 'i tasti in basso' : '') : h);
+  if (window.matchMedia('(pointer: coarse)').matches && app.view !== '2d' && view.mode === 'walk') h = 'Trascina il dito per guardarti attorno · usa le frecce in basso per muoverti';
+  $('#hint').textContent = (window.matchMedia('(pointer: coarse)').matches ? h.replace(/ · Alt = senza agganci| · Maiusc per correre/g, '') : h);
 }
 
 // ---------- viste ----------
@@ -271,12 +274,28 @@ view.onProgress = st => {
   else t = n + (st.max ? ' / ' + st.max : '') + (n === 1 ? ' passaggio' : ' passaggi');
   $('#rSamples').textContent = t;
 };
-view.onSlow = () => { $('#rSamples').textContent = 'Preparo il render…'; toast('Questo browser non ha WebGPU: il primo render può richiedere qualche minuto'); };
-$('#rSave').addEventListener('click', () => {
+view.onSlow = () => { $('#rSamples').textContent = 'Preparo il render…'; toast('Render in modalità compatibile (WebGL): ' + (view.gpuWhy || 'WebGPU non disponibile') + '. Il primo render può richiedere qualche minuto.'); if (app.view === 'render') renderPanel(); };
+$('#rSave').addEventListener('click', async () => {
+  const url = view.snapshot();
+  const name = (project ? project.name : 'pianta') + ' - render.png';
+  const touch = window.matchMedia('(pointer: coarse)').matches;
+  // su iPhone e iPad (anche aperta come app dalla Home) il download non funziona o finisce in File:
+  // si usa il foglio di condivisione, da cui «Salva immagine» la mette in Foto
+  if (touch && navigator.canShare) {
+    try {
+      const blob = await (await fetch(url)).blob();
+      const file = new File([blob], name, { type: 'image/png' });
+      if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  if (touch) {
+    // ultima strada: l'immagine a tutto schermo, da tenere premuta per salvarla
+    modal(`<h2>Immagine pronta</h2><p class="note">Tieni premuto sull’immagine e scegli «Salva in Foto» (o «Aggiungi a Foto»).</p><img src="${url}" alt="" style="width:100%;border-radius:8px"><footer><button class="primary" data-close>Chiudi</button></footer>`);
+    return;
+  }
   const a = document.createElement('a');
-  a.href = view.snapshot();
-  a.download = (project ? project.name : 'pianta') + ' - render.png';
-  a.click();
+  a.href = url; a.download = name; a.click();
+  toast('Immagine salvata nella cartella Download');
 });
 for (const b of document.querySelectorAll('#walkpad button')) {
   const k = b.dataset.k;
@@ -711,6 +730,20 @@ function panelItem(it) {
   if (cat.light !== 'ceiling') panel.append(numField('Da terra', it.elev || 0, setVal(v => { it.elev = v; }, 'Altezza da terra'), { min: 0, max: 400 }));
   panel.append(numField('Rotazione', it.rot, setVal(v => { it.rot = ((v % 360) + 360) % 360; }, 'Ruota'), { unit: '°', min: -360, max: 720 }));
   panel.append(h('div', { class: 'row' }, btn('↺ 90°', () => { it.rot = (it.rot + 270) % 360; commit('Ruota'); }), btn('↻ 90°', () => { it.rot = (it.rot + 90) % 360; commit('Ruota'); })));
+  if (model && model.col && !model.single) {
+    panel.append(h('h3', {}, 'Colore'));
+    panel.append(h('div', { class: 'row' }, btn('Colori del file', () => { it.paint = false; commit('Colore modello'); }, !it.paint ? 'on' : ''), btn('Tinta unica', () => { it.paint = true; commit('Colore modello'); }, it.paint ? 'on' : '')));
+    if (it.paint) panel.append(swatches(ITEM_COLORS, it.color, setVal(c => { it.color = c; }, 'Colore')));
+  }
+  if (model) panel.append(checkField('È una lampada (fa luce)', !!it.glow, setVal(v => { it.glow = v; if (v && it.on === undefined) Object.assign(it, { on: true, power: 1, lightColor: '#ffd9a8' }); }, 'Lampada')));
+  if (isLamp(it)) {
+    panel.append(h('h3', {}, 'Luce'));
+    panel.append(checkField('Accesa', it.on !== false, setVal(v => { it.on = v; }, 'Accendi')));
+    panel.append(rangeField('Intensità', it.power ?? 1, 0.1, 5, 0.1, (v, fin) => { it.power = v; if (fin) commit('Intensità luce'); }, v => v.toFixed(1).replace('.', ',') + '×'));
+    panel.append(h('p', {}, 'Colore della luce'));
+    panel.append(swatches(['#ffc88a', '#ffd9a8', '#fff1dc', '#ffffff', '#dfeaff', '#b8d4ff'], it.lightColor || '#ffd9a8', setVal(c => { it.lightColor = c; }, 'Colore luce')));
+    panel.append(h('p', {}, 'Le lampade si vedono accese con l’illuminazione «Sera» o «Tramonto», oppure con «Lampade accese» nel pannello del render.'));
+  }
   if (!model || model.single || !model.col) {
     panel.append(h('h3', {}, 'Colore'));
     panel.append(swatches(ITEM_COLORS, it.color, setVal(c => { it.color = c; }, 'Colore')));
@@ -771,16 +804,29 @@ function panelDim(dm) {
   panel.append(h('div', { class: 'row' }, btn('Elimina', deleteSel, 'danger')));
 }
 
+/** Sezione «Illuminazione»: preset, sole, lampade, luce diffusa ed esposizione (vista 3D e render). */
+function lightSection(live) {
+  const L = view.light, Rl = resolveLight(L);
+  const set = (o, fin) => { Object.assign(L, o); if (fin !== false || live) view.setLight({}); };
+  panel.append(h('h3', {}, 'Illuminazione'));
+  const pr = h('div', { class: 'presets' });
+  for (const [k, P] of Object.entries(LIGHT_PRESETS)) pr.append(h('button', { type: 'button', class: 'btn' + (L.preset === k ? ' on' : ''), title: P.hint, onclick: () => { L.preset = k; L.sunElOverride = false; L.fillScale = 1; L.expScale = 1; view.setLight({}); renderTools(); renderPanel(); } }, P.name));
+  panel.append(pr);
+  panel.append(h('p', {}, (LIGHT_PRESETS[L.preset] || LIGHT_PRESETS.auto).hint + '.'));
+  if (Rl.day && Rl.sun > 0) {
+    panel.append(rangeField('Direzione del sole', L.sunAz, 0, 360, 5, (v, fin) => set({ sunAz: v }, fin), v => v + '°'));
+    panel.append(rangeField('Altezza del sole', Rl.sunEl, 3, 85, 1, (v, fin) => set({ sunEl: v, sunElOverride: true }, fin), v => v + '°'));
+  }
+  panel.append(rangeField('Luce diffusa nella stanza', L.fillScale ?? 1, 0, 3, 0.1, (v, fin) => set({ fillScale: v }, fin), v => v.toFixed(1).replace('.', ',') + '×'));
+  panel.append(checkField('Lampade accese', Rl.lampsOn, v => { set({ lampsDay: v && !(LIGHT_PRESETS[L.preset] || {}).lamps }); if (!v && (LIGHT_PRESETS[L.preset] || {}).lamps) toast('Con questo preset le lampade sono accese: puoi spegnerle una per una nel pannello della lampada'); renderPanel(); }));
+  if (Rl.lampsOn) panel.append(rangeField('Potenza di tutte le lampade', L.lamps ?? 1, 0.2, 4, 0.1, (v, fin) => set({ lamps: v }, fin), v => v.toFixed(1).replace('.', ',') + '×'));
+  panel.append(rangeField('Esposizione', L.expScale ?? 1, 0.3, 3, 0.05, (v, fin) => set({ expScale: v }, fin), v => v.toFixed(2).replace('.', ',') + '×'));
+}
+
 function panel3D() {
   panel.append(h('h2', {}, 'Vista 3D'));
   panel.append(h('p', {}, 'Clicca un arredo per selezionarlo e trascinalo sul pavimento; una parete o un pavimento per cambiarne i colori. Con «Cammina» guardi la casa dall’altezza degli occhi.'));
-  panel.append(h('h3', {}, 'Luce'));
-  const L = view.light;
-  panel.append(h('div', { class: 'row' }, btn('Giorno', () => { view.setLight({ mode: 'day' }); renderTools(); renderPanel(); }, L.mode === 'day' ? 'on' : ''), btn('Sera', () => { view.setLight({ mode: 'night' }); renderTools(); renderPanel(); }, L.mode !== 'day' ? 'on' : '')));
-  if (L.mode === 'day') {
-    panel.append(rangeField('Direzione del sole', L.sunAz, 0, 360, 5, v => view.setLight({ sunAz: v }), v => v + '°'));
-    panel.append(rangeField('Altezza del sole', L.sunEl, 5, 85, 1, v => view.setLight({ sunEl: v }), v => v + '°'));
-  } else panel.append(rangeField('Lampade', L.lamps, 0.2, 3, 0.1, v => view.setLight({ lamps: v }), v => v.toFixed(1).replace('.', ',') + '×'));
+  lightSection(true);
   panel.append(numField('Altezza occhi', app.doc.settings.eye || 160, setVal(v => { app.doc.settings.eye = v; if (view.mode === 'walk') view.camera.position.y = v / 100; }, 'Altezza occhi'), { min: 50, max: 250 }));
   panel.append(h('h3', {}, 'Render'));
   panel.append(h('p', {}, 'Metti la vista dove ti piace (ad esempio con «Cammina» dentro una stanza) e passa a «Render» per l’immagine fotorealistica.'));
@@ -797,19 +843,7 @@ function panelRender() {
   panel.append(h('p', {}, R.style === 'pt' ? 'Luce vera, riflessi e ombre morbide: l’immagine si pulisce a ogni passaggio e alla fine un filtro toglie il rumore. Puoi ancora girare la vista: il calcolo riparte.'
     : R.style === 'raster' ? 'Immagine immediata con ombre del sole e luce d’ambiente: meno realistica, ma pronta subito anche mentre ti muovi.'
       : 'Disegno a contorni su modello bianco, pronto subito: utile per presentare gli spazi.'));
-  const L = view.light;
-  if (R.style !== 'sketch') {
-    panel.append(h('h3', {}, 'Luce'));
-    panel.append(h('div', { class: 'row' }, btn('Giorno', () => { view.setLight({ mode: 'day' }); renderPanel(); }, L.mode === 'day' ? 'on' : ''), btn('Sera', () => { view.setLight({ mode: 'night' }); renderPanel(); }, L.mode !== 'day' ? 'on' : '')));
-    if (L.mode === 'day') {
-      panel.append(rangeField('Direzione del sole', L.sunAz, 0, 360, 5, (v, fin) => { L.sunAz = v; if (fin || R.style !== 'pt') view.setLight({}); }, v => v + '°'));
-      panel.append(rangeField('Altezza del sole', L.sunEl, 5, 85, 1, (v, fin) => { L.sunEl = v; if (fin || R.style !== 'pt') view.setLight({}); }, v => v + '°'));
-      if (R.style === 'pt') panel.append(checkField('Lampade accese', L.lampsDay, v => view.setLight({ lampsDay: v })));
-    } else panel.append(rangeField('Lampade', L.lamps, 0.2, 3, 0.1, (v, fin) => { L.lamps = v; if (fin || R.style !== 'pt') view.setLight({}); }, v => v.toFixed(1).replace('.', ',') + '×'));
-    panel.append(rangeField('Esposizione', R.style === 'pt' ? view.renderExposure : view.renderer.toneMappingExposure, 0.3, 4, 0.05, v => {
-      if (R.style === 'pt') { view.renderExposure = v; if (!view.useGpu) { view.renderer.toneMappingExposure = v; view._resetTrace(); } } else view.renderer.toneMappingExposure = v;
-    }, v => v.toFixed(2).replace('.', ',')));
-  }
+  if (R.style !== 'sketch') lightSection(R.style !== 'pt');
   if (R.style === 'pt') {
     panel.append(h('h3', {}, 'Velocità e qualità'));
     const P = { rapida: [16, 3, 0.5], bozza: [32, 4, 0.75], buona: [96, 6, 1], alta: [300, 8, 1], continua: [0, 8, 1] };
@@ -823,6 +857,7 @@ function panelRender() {
     panel.append(h('label', { class: 'field' }, h('span', {}, 'Risoluzione'), rs));
     if (view.gpuOk !== false) panel.append(checkField('Togli il rumore alla fine', R.denoise, v => { R.denoise = v; restart(); }));
     panel.append(h('p', {}, 'Più veloce: meno passaggi, meno rimbalzi (2–3 bastano per una bozza), risoluzione più bassa. «Passaggi» a 0 = continua finché non cambi vista.'));
+    panel.append(h('p', { class: 'engine' }, view.useGpu ? 'Motore: WebGPU (veloce).' : view.gpuOk === false ? 'Motore: WebGL compatibile, più lento — ' + (view.gpuWhy || 'WebGPU non disponibile') + '.' : ''));
   }
   panel.append(h('div', { class: 'row' }, btn('Cammina', () => { view.setMode('walk'); updateWalkpad(); renderTools(); }), btn('Orbita', () => { view.setMode('orbit'); updateWalkpad(); renderTools(); })));
 }

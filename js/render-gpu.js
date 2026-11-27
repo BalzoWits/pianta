@@ -4,35 +4,15 @@
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { WebGPUPathTracer, OIDNDenoiser } from 'pathtracer-webgpu';
-import { buildHouse } from './house3d.js';
-import { GLASS } from './materials.js';
+import { buildRenderScene } from './lighting.js';
 
 const M = 0.01;
 
+/** WebGPU utilizzabile? Restituisce { ok, why } (il motivo serve per spiegarlo all'utente). */
 export async function webgpuAvailable() {
-  try { return !!(navigator.gpu && await navigator.gpu.requestAdapter()); } catch (e) { return false; }
-}
-
-/** Cielo a gradiente (equirettangolare, float): zenit, orizzonte e terreno. */
-export function skyTexture(day) {
-  const W = 256, H = 128;
-  const data = new Float32Array(W * H * 4);
-  const top = day ? [0.32, 0.52, 0.95] : [0.01, 0.015, 0.035];
-  const hor = day ? [1.0, 0.98, 0.94] : [0.05, 0.06, 0.09];
-  const gnd = day ? [0.42, 0.40, 0.36] : [0.02, 0.02, 0.025];
-  for (let y = 0; y < H; y++) {
-    const v = 1 - (y + 0.5) / H; // 1 = zenit
-    const el = (v - 0.5) * Math.PI; // elevazione
-    let c;
-    if (el >= 0) { const t = Math.pow(Math.sin(el), 0.55); c = hor.map((h, i) => h + (top[i] - h) * t); }
-    else { const t = Math.min(1, -el * 6); c = hor.map((h, i) => h + (gnd[i] - h) * t); }
-    for (let x = 0; x < W; x++) { const o = (y * W + x) * 4; data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = 1; }
-  }
-  const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
-  t.mapping = THREE.EquirectangularReflectionMapping;
-  t.magFilter = t.minFilter = THREE.LinearFilter;
-  t.needsUpdate = true;
-  return t;
+  if (!navigator.gpu) return { ok: false, why: 'questo browser non ha WebGPU (su iPhone e iPad serve iOS/iPadOS 26 o successivo)' };
+  try { const a = await navigator.gpu.requestAdapter(); return a ? { ok: true } : { ok: false, why: 'la scheda grafica non è disponibile per WebGPU' }; }
+  catch (e) { return { ok: false, why: 'WebGPU non si è avviato (' + e.message + ')' }; }
 }
 
 export class GpuTracer {
@@ -86,36 +66,12 @@ export class GpuTracer {
     this.canvas.style.width = w + 'px'; this.canvas.style.height = h + 'px';
   }
 
-  /** (Ri)costruisce la scena: casa con soffitti, senza vetri, cielo, sole e lampade. */
+  /** (Ri)costruisce la scena (lighting.js: la stessa del render WebGL). */
   setup(doc, light, opts) {
-    const day = light.mode === 'day';
     if (this.scene) this.scene.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
-    const scene = new THREE.Scene();
-    // soffitti solo se la camera e' dentro casa (da fuori coprirebbero tutto)
-    const inside = this.view.camera.position.y * 100 < doc.settings.wallHeight;
-    const { group, bounds } = buildHouse(doc, { ceilings: inside, models: this.view.app.modelGeos() });
-    const glass = [];
-    group.traverse(o => { if (o.isMesh && o.material === GLASS) glass.push(o); });
-    for (const g of glass) g.parent.remove(g);
-    group.traverse(o => { if (o.isPointLight && o.userData.lamp) { o.intensity = day ? (light.lampsDay ? 1.4 : 0) : 1.6 * light.lamps; o.visible = o.intensity > 0; } });
-    scene.add(group);
-    const gnd = new THREE.Mesh(new THREE.CircleGeometry(200, 48), new THREE.MeshStandardMaterial({ color: day ? 0xb7bda8 : 0x30332c, roughness: 1 }));
-    gnd.rotation.x = -Math.PI / 2; gnd.position.y = -0.045;
-    scene.add(gnd);
-    if (day) {
-      const c = bounds.isEmpty() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
-      const az = light.sunAz * Math.PI / 180, el = light.sunEl * Math.PI / 180;
-      const sun = new THREE.DirectionalLight(0xfff0d8, 3.2);
-      sun.position.set(c.x + Math.sin(az) * Math.cos(el) * 30, Math.sin(el) * 30, c.z - Math.cos(az) * Math.cos(el) * 30);
-      sun.target.position.copy(c);
-      scene.add(sun, sun.target);
-    }
     if (this.sky) this.sky.dispose();
-    this.sky = skyTexture(day);
-    scene.environment = this.sky;
-    scene.background = this.sky;
-    scene.environmentIntensity = day ? 2.2 : 0.6;
-    this.scene = scene;
+    const { scene, sky, R } = buildRenderScene(doc, this.view.camera, light, this.view.app.modelGeos());
+    this.scene = scene; this.sky = sky; this.R = R;
     this.pt.maxBounces = opts.bounces;
     this.pt.renderScale = opts.scale;
     this.pt.maxSamples = opts.samples || 0;
@@ -143,7 +99,7 @@ export class GpuTracer {
     const loop = () => {
       if (!this.running) return;
       if (this._syncCam(false)) this.pt.updateCamera();
-      this.renderer.toneMappingExposure = this.view.renderExposure;
+      this.renderer.toneMappingExposure = (this.R ? this.R.exposure : 1.4) * (this.view.renderExposure / 1.6);
       this.pt.renderSample();
       requestAnimationFrame(loop);
     };

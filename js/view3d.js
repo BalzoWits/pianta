@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { buildHouse } from './house3d.js';
 import { GLASS } from './materials.js';
+import { resolveLight, applyLamps, addFill, buildRenderScene, initRectLights } from './lighting.js';
 
 const M = 0.01;
 
@@ -51,7 +52,8 @@ export class View3D {
     this.houseGroup = null;
     this.mode = 'orbit';   // 'orbit' | 'walk'
     this.lowWalls = false;
-    this.light = { mode: 'day', sunAz: 135, sunEl: 40, lamps: 1 };
+    this.light = { preset: 'auto', mode: 'day', sunAz: 135, sunEl: 40, lamps: 1 };
+    initRectLights();
     this.pt = null; this.tracing = false;
     this.renderExposure = 1.6;
     this.keys = new Set();
@@ -149,24 +151,30 @@ export class View3D {
 
   setLight(opts) { Object.assign(this.light, opts); this._applyLights(); if (this.tracing) this._resetTrace(true); }
   _applyLights() {
-    const L = this.light, day = L.mode === 'day';
-    const az = L.sunAz * Math.PI / 180, el = L.sunEl * Math.PI / 180;
+    const L = this.light, R = resolveLight(L), day = R.day;
+    L.mode = day ? 'day' : 'night';
+    const az = R.sunAz * Math.PI / 180, el = R.sunEl * Math.PI / 180;
     const c = this.bounds && !this.bounds.isEmpty() ? this.bounds.getCenter(new THREE.Vector3()) : new THREE.Vector3();
-    const R = 30;
-    this.sun.position.set(c.x + Math.sin(az) * Math.cos(el) * R, Math.sin(el) * R, c.z - Math.cos(az) * Math.cos(el) * R);
+    const D = 30;
+    this.sun.position.set(c.x + Math.sin(az) * Math.cos(el) * D, Math.sin(el) * D, c.z - Math.cos(az) * Math.cos(el) * D);
     this.sun.target.position.copy(c);
     const s = this.bounds && !this.bounds.isEmpty() ? this.bounds.getSize(new THREE.Vector3()) : new THREE.Vector3(10, 3, 10);
     const ext = Math.max(s.x, s.z) * 0.75 + 2;
     Object.assign(this.sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 1, far: 80 });
     this.sun.shadow.camera.updateProjectionMatrix();
-    this.sun.intensity = day ? 2.4 : 0;
-    this.sun.visible = day;
-    this.hemi.intensity = day ? 0.75 : 0.12;
+    this.sun.intensity = day ? 2.4 * Math.min(1, R.sun / 3.2) : 0;
+    this.sun.color.set(R.sunColor);
+    this.sun.visible = day && R.sun > 0;
+    this.hemi.intensity = day ? (R.sun > 0 ? 0.75 : 1.4) : 0.12;
     this.scene.environmentIntensity = day ? 0.35 : 0.06;
-    this.scene.background = new THREE.Color(day ? 0xdfe6ec : 0x1c2230);
-    if (this.houseGroup) this.houseGroup.traverse(o => {
-      if (o.isPointLight && o.userData.lamp) { o.intensity = day ? 0 : 1.4 * L.lamps; o.castShadow = false; o.distance = 0; }
-    });
+    this.scene.background = new THREE.Color(day ? (R.sunColor === '#ffad66' ? 0xf0c9a0 : 0xdfe6ec) : 0x1c2230);
+    if (this.houseGroup) {
+      applyLamps(this.houseGroup, R, 1);
+      // luce di riempimento anche nella vista (solo nella passeggiata e negli stili Veloce)
+      this.houseGroup.children.filter(o => o.userData.fill).forEach(o => this.houseGroup.remove(o));
+      if (this.mode === 'walk' || this.renderMode === 'raster') addFill(this.houseGroup, this.app.doc, this.camera.position, { ...R, fill: R.fill * 0.6 });
+    }
+    if (this.renderMode === 'raster') this.renderer.toneMappingExposure = Math.min(1.4, R.exposure * 0.75);
   }
 
   // ---------- selezione ----------
@@ -203,7 +211,11 @@ export class View3D {
     const el = this.renderer.domElement;
     el.addEventListener('pointerdown', e => {
       this.down = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
-      if (this.mode === 'walk') { el.setPointerCapture(e.pointerId); this.look = { x: e.clientX, y: e.clientY, yaw: this.yaw, pitch: this.pitch }; return; }
+      if (this.mode === 'walk') {
+        // con il mouse: clic = il puntatore sparisce e muovendo il mouse si guarda attorno (Esc per uscire)
+        if (e.pointerType === 'mouse' && el.requestPointerLock && document.pointerLockElement !== el) { try { el.requestPointerLock(); } catch (err) { /* niente */ } }
+        el.setPointerCapture(e.pointerId); this.look = { x: e.clientX, y: e.clientY, yaw: this.yaw, pitch: this.pitch }; return;
+      }
       if (e.button !== 0 || !this.houseGroup) return;
       // trascinamento di un mobile selezionato
       const sel = this.app.sel;
@@ -220,7 +232,15 @@ export class View3D {
         }
       }
     });
+    el.addEventListener('mousemove', e => {
+      if (document.pointerLockElement !== el || this.mode !== 'walk') return;
+      this.yaw -= e.movementX * 0.0025;
+      this.pitch = Math.max(-1.3, Math.min(1.3, this.pitch - e.movementY * 0.0025));
+      this._applyLook();
+      if (this.tracing) this._resetTrace();
+    });
     el.addEventListener('pointermove', e => {
+      if (document.pointerLockElement === el) return;
       if (this.look && this.mode === 'walk') {
         const k = 0.005;
         this.yaw = this.look.yaw - (e.clientX - this.look.x) * k;
@@ -293,14 +313,15 @@ export class View3D {
       const v = new THREE.Vector3();
       if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) v.add(f);
       if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) v.sub(f);
-      if (this.keys.has('KeyD')) v.add(r);
-      if (this.keys.has('KeyA')) v.sub(r);
-      if (this.keys.has('ArrowLeft')) { this.yaw += dt * 1.6; this._applyLook(); }
-      if (this.keys.has('ArrowRight')) { this.yaw -= dt * 1.6; this._applyLook(); }
+      if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) v.add(r);
+      if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) v.sub(r);
+      if (this.keys.has('KeyQ')) { this.yaw += dt * 1.6; this._applyLook(); }
+      if (this.keys.has('KeyE')) { this.yaw -= dt * 1.6; this._applyLook(); }
       if (v.lengthSq()) { this.camera.position.addScaledVector(v.normalize(), sp); }
       if (this.tracing) this._resetTrace();
     }
     if (this.mode === 'orbit') this.controls.update();
+    if (this.mode !== 'walk' && document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     if (this.tracing && this.useGpu) {
       // disegna la tela WebGPU (render-gpu.js)
     } else if (this.tracing && this.pt) {
@@ -347,16 +368,22 @@ export class View3D {
     if (this.renderMode) { this.renderMode = null; this.ground.material.color.set(0xcfd3c4); }
     this.tracing = true;
     if (this.gpuOk === undefined) {
-      const { webgpuAvailable } = await import('./render-gpu.js');
-      this.gpuOk = await webgpuAvailable();
+      try {
+        const { webgpuAvailable } = await import('./render-gpu.js');
+        const r = await webgpuAvailable();
+        this.gpuOk = r.ok; this.gpuWhy = r.why || '';
+      } catch (e) { this.gpuOk = false; this.gpuWhy = 'il motore WebGPU non si è caricato (' + e.message + ')'; }
     }
     if (this.gpuOk) {
       try {
-        if (!this.gpu) {
+        // un solo avvio del motore anche se il render parte due volte di fila (opzioni cambiate subito)
+        if (!this.gpuReady) this.gpuReady = (async () => {
           const { GpuTracer } = await import('./render-gpu.js');
-          this.gpu = new GpuTracer(this.host, this);
-          await this.gpu.init();
-        }
+          const g = new GpuTracer(this.host, this);
+          await g.init();
+          this.gpu = g;
+        })();
+        try { await this.gpuReady; } catch (e) { this.gpuReady = null; throw e; }
         if (!this.tracing) return;
         this.useGpu = true;
         this.gpu.resize();
@@ -365,7 +392,7 @@ export class View3D {
         this.gpu.start(this.onProgress);
         this.renderer.domElement.style.visibility = 'hidden';
         return;
-      } catch (e) { console.warn('WebGPU non disponibile, uso WebGL', e); this.gpuOk = false; this.useGpu = false; }
+      } catch (e) { console.warn('WebGPU non disponibile, uso WebGL', e); this.gpuOk = false; this.useGpu = false; this.gpuWhy = 'WebGPU si è fermato: ' + (e.message || e); if (this.gpu) { try { this.gpu.stop(); } catch (er) { /* niente */ } } }
     }
     if (this.onSlow) this.onSlow();
     const { WebGLPathTracer, GradientEquirectTexture } = await import('three-gpu-pathtracer');
@@ -389,26 +416,11 @@ export class View3D {
     if (this.useGpu) { if (full && this.tracing) this.gpu.setup(this.app.doc, this.light, this.traceOpts); return; }
     if (!this.pt || !this.tracing) return;
     if (!full) { this.pt.updateCamera(); return; }
-    // scena per il path tracer: vetri tolti (la luce passa dalle finestre), cielo come ambiente
-    const day = this.light.mode === 'day';
-    const sky = new this.GradientEquirectTexture();
-    sky.topColor.set(day ? 0x8fb8ea : 0x0d1424);
-    sky.bottomColor.set(day ? 0xf3efe6 : 0x1b2232);
-    sky.exponent = 2.2;
-    sky.update();
-    if (this.skyTex) this.skyTex.dispose();
-    this.skyTex = sky;
-    if (!this._savedEnv) this._savedEnv = { env: this.envTex, bg: null, ei: 0.35 };
-    this.scene.environment = sky;
-    this.scene.background = sky;
-    this.scene.environmentIntensity = day ? 1.0 : 0.15;
-    this.scene.backgroundIntensity = 1;
-    this.hemi.visible = false;
-    const hidden = [];
-    this.houseGroup.traverse(o => { if (o.isMesh && o.material === GLASS) { o.visible = false; hidden.push(o); } });
-    this.ground.visible = true;
-    this.houseGroup.traverse(o => { if (o.isPointLight && o.userData.lamp) { o.intensity = day ? (this.light.lampsDay ? 1.4 : 0) : 1.6 * this.light.lamps; } });
-    this.pt.setScene(this.scene, this.camera);
+    // stessa scena del render WebGPU (lighting.js): cielo, sole, riempimento, lampade, esposizione
+    if (this.ptScene) this.ptScene.scene.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
+    this.ptScene = buildRenderScene(this.app.doc, this.camera, this.light, this.app.modelGeos());
+    this.renderer.toneMappingExposure = this.ptScene.R.exposure * (this.renderExposure / 1.6);
+    this.pt.setScene(this.ptScene.scene, this.camera);
   }
   stopTrace() {
     if (this.renderMode) { this.renderMode = null; this.ground.material.color.set(0xcfd3c4); this.rebuild(); }
