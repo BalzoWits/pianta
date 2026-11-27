@@ -798,6 +798,11 @@ function panelItem(it) {
       commit('Base');
     }, (it.base || cat.bases[0]) === b ? 'on' : ''))));
   }
+  if (cat.params) {
+    panel.append(h('h3', {}, it.kind === 'armadioPonte' ? 'Vano del ponte' : 'Ante'));
+    for (const pdef of cat.params) panel.append(numField(pdef.label, it[pdef.key] ?? pdef.def, setVal(v => { it[pdef.key] = Math.round(v); }, pdef.label), { unit: pdef.unit ?? 'cm', min: pdef.min, max: pdef.max }));
+    if (it.kind === 'armadioPonte') panel.append(h('p', {}, 'Le colonne ai lati sono alte e profonde come l’armadio; il ponte sopra il vano resta appoggiato al muro. Metti il letto nel vano.'));
+  }
   if (it.kind === 'mobileTV' || it.kind === 'mobileBasso') panel.append(checkField('Con televisore', it.tv !== false, setVal(v => { it.tv = v; }, 'Televisore')));
   if (cat.light !== 'ceiling') panel.append(numField(it.base === 'wall' ? 'Da terra (sospeso)' : 'Da terra', it.elev || 0, setVal(v => { it.elev = v; }, 'Altezza da terra'), { min: 0, max: 400 }));
   panel.append(numField('Rotazione', it.rot, setVal(v => { it.rot = ((v % 360) + 360) % 360; }, 'Ruota'), { unit: '°', min: -360, max: 720 }));

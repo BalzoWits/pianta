@@ -8,6 +8,11 @@ const M = 0.01; // cm -> m
 
 function box(g, w, h, d, x, y, z, mat, r = 0) {
   const geo = r > 0 ? new RoundedBoxGeometry(w * M, h * M, d * M, 3, Math.min(r, w / 2 - 0.1, h / 2 - 0.1, d / 2 - 0.1) * M) : new THREE.BoxGeometry(w * M, h * M, d * M);
+  // finiture con texture (legno): coordinate in scala reale, una ripetizione ogni 60 cm su ogni faccia
+  if (mat && mat.map && !r) {
+    const uv = geo.getAttribute('uv'), dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+    for (let f = 0; f < 6; f++) for (let k = 0; k < 4; k++) { const i = f * 4 + k; uv.setXY(i, uv.getX(i) * dims[f][0] / 60, uv.getY(i) * dims[f][1] / 60); }
+  }
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x * M, (y + h / 2) * M, z * M);
   g.add(m);
@@ -42,6 +47,19 @@ function shade(g, rTop, rBot, h, x, y, z, color) {
   m.position.set(x * M, (y + h / 2) * M, z * M);
   g.add(m);
   return m;
+}
+/** Blocco d'armadio da x0 a x1 (cm) e da y0 a y1, profondita' d (fronte a z = zf + d/2), con n ante e maniglie. */
+function wardrobe(g, x0, x1, y0, y1, d, zf, n, m, color) {
+  const w = x1 - x0, cx = (x0 + x1) / 2;
+  box(g, w, y1 - y0, d, cx, y0, zf, m);
+  const seam = solid(dark(color));
+  for (let i = 1; i < n; i++) box(g, 0.4, y1 - y0 - 4, 0.4, x0 + w * i / n, y0 + 2, zf + d / 2, seam);
+  const hh = Math.min(30, (y1 - y0) * 0.35);
+  for (let i = 0; i < n; i++) {
+    // maniglie vicine all'anta accanto (a coppie), oppure al centro se l'anta e' sola
+    const f = n === 1 ? 0.9 : (i % 2 ? 0.1 : 0.9);
+    box(g, 1.5, hh, 2, x0 + w * (i + f) / n, (y0 + y1) / 2 - hh / 2, zf + d / 2 + 1, CHROME);
+  }
 }
 const legs4 = (g, w, d, h, inset, s, mat, round = false) => {
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
@@ -236,12 +254,10 @@ export const CATALOG = {
   },
   armadio: {
     name: 'Armadio', cat: 'Camera', w: 200, d: 60, h: 240, color: '#f2efe9',
+    params: [{ key: 'doors', label: 'Numero di ante', def: 4, min: 1, max: 10, unit: '' }],
     build(g, it) {
       const m = solid(it.color, { rough: 0.45 });
-      box(g, it.w, it.h, it.d, 0, 0, 0, m);
-      const doors = Math.max(1, Math.round(it.w / 50));
-      for (let i = 1; i < doors; i++) box(g, 0.4, it.h - 4, 0.4, -it.w / 2 + it.w * i / doors, 2, it.d / 2, solid(dark(it.color)));
-      for (let i = 0; i < doors; i++) box(g, 1.5, 30, 2, -it.w / 2 + it.w * (i + (i % 2 ? 0.1 : 0.9)) / doors, it.h / 2 - 15, it.d / 2 + 1, CHROME);
+      wardrobe(g, -it.w / 2, it.w / 2, 0, it.h, it.d, 0, Math.max(1, Math.round(it.doors || it.w / 50)), m, it.color);
     },
     draw(ctx, it) { box2d(ctx, it, '#fff'); ctx.beginPath(); ctx.moveTo(-it.w / 2 + 4, 0); ctx.lineTo(it.w / 2 - 4, 0); ctx.stroke(); for (let x = -it.w / 2 + 15; x < it.w / 2 - 5; x += 15) { ctx.beginPath(); ctx.moveTo(x, -6); ctx.lineTo(x - 6, 6); ctx.stroke(); } },
   },
@@ -481,6 +497,36 @@ export const CATALOG = {
     draw(ctx, it) { box2d(ctx, it, '#fff'); rect(ctx, -it.w / 2 + 15, -it.d / 2 + 3, it.w - 30, it.d - 30); },
   },
   letto120: { like: 'letto2', name: 'Letto da una piazza e mezza', w: 120 },
+  armadioPonte: {
+    name: 'Armadio a ponte', cat: 'Camera', w: 320, d: 60, h: 260, color: '#f2efe9',
+    params: [
+      { key: 'gapLeft', label: 'Vano: distanza da sinistra', def: 70, min: 0, max: 1000 },
+      { key: 'gapW', label: 'Vano: larghezza', def: 180, min: 40, max: 1000 },
+      { key: 'gapH', label: 'Vano: altezza', def: 200, min: 40, max: 400 },
+      { key: 'bridgeD', label: 'Profondità del ponte', def: 40, min: 15, max: 100 },
+    ],
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.45 });
+      const W = it.w, x0 = -W / 2;
+      const gl = Math.max(0, Math.min(W - 10, it.gapLeft ?? 70));
+      const gw = Math.max(10, Math.min(W - gl, it.gapW ?? 180));
+      const gh = Math.max(10, Math.min(it.h - 10, it.gapH ?? 200));
+      const bd = Math.max(10, Math.min(it.d, it.bridgeD ?? 40));
+      const doorsFor = w => Math.max(1, Math.round(w / 50));
+      if (gl > 5) wardrobe(g, x0, x0 + gl, 0, it.h, it.d, 0, doorsFor(gl), m, it.color);
+      if (W - gl - gw > 5) wardrobe(g, x0 + gl + gw, W / 2, 0, it.h, it.d, 0, doorsFor(W - gl - gw), m, it.color);
+      // ponte: appoggiato al muro (dietro), meno profondo delle colonne
+      wardrobe(g, x0 + gl, x0 + gl + gw, gh, it.h, bd, -it.d / 2 + bd / 2, doorsFor(gw), m, it.color);
+    },
+    draw(ctx, it) {
+      const W = it.w, x0 = -W / 2;
+      const gl = Math.max(0, Math.min(W - 10, it.gapLeft ?? 70)), gw = Math.max(10, Math.min(W - gl, it.gapW ?? 180));
+      const bd = Math.max(10, Math.min(it.d, it.bridgeD ?? 40));
+      if (gl > 5) rect(ctx, x0, -it.d / 2, gl, it.d, '#fff');
+      if (W - gl - gw > 5) rect(ctx, x0 + gl + gw, -it.d / 2, W - gl - gw, it.d, '#fff');
+      ctx.setLineDash([5, 4]); rect(ctx, x0 + gl, -it.d / 2, gw, bd); ctx.setLineDash([]);
+    },
+  },
   specchioTerra: {
     name: 'Specchio da terra', cat: 'Camera', w: 60, d: 30, h: 170, color: '#c9a274',
     build(g, it) {
@@ -612,6 +658,7 @@ export function newItem(kind, x, y) {
   if (c.light) Object.assign(it, { on: true, power: 1, lightColor: '#ffd9a8' });
   if (c.noTv) it.tv = false;
   if (c.bases) it.base = c.bases[0];
+  for (const p of c.params || []) it[p.key] = p.def;
   return it;
 }
 /** L'oggetto fa luce? (lampade del catalogo o modelli importati segnati come luminosi) */
