@@ -4,6 +4,7 @@ import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js';
 import { View3D } from './view3d.js';
 import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js';
 import { LIGHT_PRESETS, resolveLight } from './lighting.js';
+import { itemThumb } from './thumbs.js';
 import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS } from './materials.js';
 import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js';
 import { skewAngle, rotateImage, detectWalls } from './detect.js';
@@ -235,7 +236,7 @@ function setHint() {
   };
   let h = '';
   if (app.view === '2d') h = H[curTool] || '';
-  else if (app.view === '3d') h = view.mode === 'walk' ? 'WASD o frecce per muoverti · clic e muovi il mouse per guardarti attorno (Esc libera il mouse) · Q/E per girare · Maiusc per correre' : 'Trascina per girare · tasto destro o due dita per spostare · clic su un arredo per selezionarlo, poi trascinalo';
+  else if (app.view === '3d') h = view.mode === 'walk' ? 'WASD o frecce per muoverti · tieni premuto e trascina per guardarti attorno · Q/E per girare · Maiusc per correre' : 'Trascina per girare · tasto destro o due dita per spostare · clic su un arredo per selezionarlo, poi trascinalo';
   else h = 'Il render migliora a ogni passaggio · muovi la vista o cammina e riparte da capo';
   if (window.matchMedia('(pointer: coarse)').matches && app.view !== '2d' && view.mode === 'walk') h = 'Trascina il dito per guardarti attorno · usa le frecce in basso per muoverti';
   $('#hint').textContent = (window.matchMedia('(pointer: coarse)').matches ? h.replace(/ · Alt = senza agganci| · Maiusc per correre/g, '') : h);
@@ -426,6 +427,7 @@ function renderPanel() {
   panel.innerHTML = '';
   swIdx = 0;
   const s = app.sel, obj = findSel(s);
+  if (obj && app.view === 'render') panel.append(h('button', { type: 'button', class: 'btn ghost back', onclick: () => setSel(null) }, '← Impostazioni del render'));
   if (obj) {
     if (s.type === 'wall') return panelWall(obj);
     if (s.type === 'node') return panelNode(obj);
@@ -663,7 +665,8 @@ function panelCatalog() {
     const g = h('div', { class: 'catalog' });
     for (const [k, v] of Object.entries(CATALOG)) {
       if (v.cat !== cat || v.hidden) continue;
-      g.append(h('button', { type: 'button', class: placeKind === k ? 'on' : '', onclick: () => chooseItem(k) }, itemPreviewCanvas(k), v.name));
+      const th = itemThumb(k);
+      g.append(h('button', { type: 'button', class: placeKind === k ? 'on' : '', onclick: () => chooseItem(k) }, th ? h('img', { src: th, alt: '', class: 'thumb' }) : itemPreviewCanvas(k), v.name));
     }
     panel.append(g);
   }
@@ -711,9 +714,16 @@ function applyModelSize(it, id) {
   if (m.single) it.color = m.single;
 }
 
+function backToCatalog() {
+  app.sel = null; view.selectionChanged(); plan.redraw();
+  if (app.view === '2d') { curTool = 'place'; placeKind = null; plan.setTool('select'); renderTools(); setHint(); }
+  else panelMode = 'catalog';
+  renderPanel();
+}
 function panelItem(it) {
   const cat = CATALOG[it.kind] || CATALOG.scatola;
   const model = it.kind === 'modello' ? app.doc.models[it.model] : null;
+  if (app.view !== 'render') panel.append(h('button', { type: 'button', class: 'btn ghost back', onclick: backToCatalog }, '← Arredi'));
   panel.append(h('h2', {}, model ? model.name : cat.name));
   const lock = !!it.lock;
   const setDim = (k) => setVal(v => {
@@ -843,7 +853,6 @@ function panelRender() {
   panel.append(h('p', {}, R.style === 'pt' ? 'Luce vera, riflessi e ombre morbide: l’immagine si pulisce a ogni passaggio e alla fine un filtro toglie il rumore. Puoi ancora girare la vista: il calcolo riparte.'
     : R.style === 'raster' ? 'Immagine immediata con ombre del sole e luce d’ambiente: meno realistica, ma pronta subito anche mentre ti muovi.'
       : 'Disegno a contorni su modello bianco, pronto subito: utile per presentare gli spazi.'));
-  if (R.style !== 'sketch') lightSection(R.style !== 'pt');
   if (R.style === 'pt') {
     panel.append(h('h3', {}, 'Velocità e qualità'));
     const P = { rapida: [16, 3, 0.5], bozza: [32, 4, 0.75], buona: [96, 6, 1], alta: [300, 8, 1], continua: [0, 8, 1] };
@@ -859,6 +868,7 @@ function panelRender() {
     panel.append(h('p', {}, 'Più veloce: meno passaggi, meno rimbalzi (2–3 bastano per una bozza), risoluzione più bassa. «Passaggi» a 0 = continua finché non cambi vista.'));
     panel.append(h('p', { class: 'engine' }, view.useGpu ? 'Motore: WebGPU (veloce).' : view.gpuOk === false ? 'Motore: WebGL compatibile, più lento — ' + (view.gpuWhy || 'WebGPU non disponibile') + '.' : ''));
   }
+  if (R.style !== 'sketch') lightSection(R.style !== 'pt');
   panel.append(h('div', { class: 'row' }, btn('Cammina', () => { view.setMode('walk'); updateWalkpad(); renderTools(); }), btn('Orbita', () => { view.setMode('orbit'); updateWalkpad(); renderTools(); })));
 }
 

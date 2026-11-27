@@ -212,8 +212,6 @@ export class View3D {
     el.addEventListener('pointerdown', e => {
       this.down = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
       if (this.mode === 'walk') {
-        // con il mouse: clic = il puntatore sparisce e muovendo il mouse si guarda attorno (Esc per uscire)
-        if (e.pointerType === 'mouse' && el.requestPointerLock && document.pointerLockElement !== el) { try { el.requestPointerLock(); } catch (err) { /* niente */ } }
         el.setPointerCapture(e.pointerId); this.look = { x: e.clientX, y: e.clientY, yaw: this.yaw, pitch: this.pitch }; return;
       }
       if (e.button !== 0 || !this.houseGroup) return;
@@ -232,15 +230,7 @@ export class View3D {
         }
       }
     });
-    el.addEventListener('mousemove', e => {
-      if (document.pointerLockElement !== el || this.mode !== 'walk') return;
-      this.yaw -= e.movementX * 0.0025;
-      this.pitch = Math.max(-1.3, Math.min(1.3, this.pitch - e.movementY * 0.0025));
-      this._applyLook();
-      if (this.tracing) this._resetTrace();
-    });
     el.addEventListener('pointermove', e => {
-      if (document.pointerLockElement === el) return;
       if (this.look && this.mode === 'walk') {
         const k = 0.005;
         this.yaw = this.look.yaw - (e.clientX - this.look.x) * k;
@@ -321,7 +311,6 @@ export class View3D {
       if (this.tracing) this._resetTrace();
     }
     if (this.mode === 'orbit') this.controls.update();
-    if (this.mode !== 'walk' && document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     if (this.tracing && this.useGpu) {
       // disegna la tela WebGPU (render-gpu.js)
     } else if (this.tracing && this.pt) {

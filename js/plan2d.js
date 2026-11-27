@@ -11,7 +11,7 @@ const COL = {
 };
 const FLOOR_TINT = { parquet: '#efe4d4', parquet2: '#e4d8cc', sbiancato: '#f2eee7', gres: '#eeeeec', gres2: '#e2e2e0', cotto: '#f1ddd2', marmo: '#f7f7f6', cemento: '#ebebea', mosaico: '#e2eef0', moquette: '#ebecee' };
 
-const NOSNAP = new Set(['tappeto', 'lampadario', 'lampadaTerra', 'tavolo', 'tavoloTondo', 'tavolino', 'sedia', 'pianta', 'cilindro']);
+const NOSNAP = new Set(['tappeto', 'lampadario', 'lampadaTerra', 'tavolo', 'tavoloTondo', 'tavolino', 'sedia', 'pianta', 'cilindro', 'pouf', 'sgabello', 'isola', 'sediaUfficio', 'faretto']);
 
 export const OPENING_TYPES = {
   door: { name: 'Porta', width: 80, height: 210, sill: 0 },

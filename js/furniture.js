@@ -343,6 +343,202 @@ export const CATALOG = {
     },
     draw(ctx, it) { circ(ctx, 0, 0, it.w / 2); circ(ctx, 0, 0, 3); },
   },
+  // ---------- altri arredi ----------
+  divanoAngolare: {
+    name: 'Divano angolare', cat: 'Soggiorno', w: 260, d: 180, h: 82, color: '#8d8a84',
+    build(g, it) {
+      const f = solid(it.color, { rough: 0.95 }), W = it.w, D = it.d, dp = 92, arm = 18;
+      box(g, W, 18, dp, 0, 4, -D / 2 + dp / 2, f, 3);
+      box(g, dp, 18, D - dp, W / 2 - dp / 2, 4, dp / 2, f, 3);
+      box(g, W - arm, it.h - 18, 20, arm / 2, 18, -D / 2 + 10, f, 8);
+      box(g, arm, 62, dp, -W / 2 + arm / 2, 4, -D / 2 + dp / 2, f, 7);
+      const seats = Math.max(2, Math.round((W - arm - dp) / 65)), sw = (W - arm - dp) / seats;
+      for (let i = 0; i < seats; i++) box(g, sw - 1, 16, dp - 22, -W / 2 + arm + sw * (i + 0.5), 20, -D / 2 + 11 + dp / 2, f, 7);
+      box(g, dp - 6, 16, D - 24, W / 2 - dp / 2 - 3, 20, 10, f, 7);
+    },
+    draw(ctx, it) {
+      const W = it.w, D = it.d, dp = 92;
+      ctx.beginPath(); ctx.moveTo(-W / 2, -D / 2); ctx.lineTo(W / 2, -D / 2); ctx.lineTo(W / 2, D / 2); ctx.lineTo(W / 2 - dp, D / 2); ctx.lineTo(W / 2 - dp, -D / 2 + dp); ctx.lineTo(-W / 2, -D / 2 + dp); ctx.closePath(); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
+      rect(ctx, -W / 2 + 18, -D / 2, W - 18, 20);
+    },
+  },
+  pouf: {
+    name: 'Pouf', cat: 'Soggiorno', w: 50, d: 50, h: 42, color: '#b5473a', round: true,
+    build(g, it) { const c = cyl(g, it.w / 2, it.h, 0, 0, 0, solid(it.color, { rough: 1 }), it.w / 2, 32); c.scale.z = it.d / it.w; },
+    draw(ctx, it) { ell(ctx, 0, 0, it.w / 2, it.d / 2, '#fff'); ell(ctx, 0, 0, it.w / 4, it.d / 4); },
+  },
+  credenza: {
+    name: 'Madia / credenza', cat: 'Soggiorno', w: 160, d: 45, h: 85, color: '#c9a274',
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.5 });
+      box(g, it.w, it.h - 15, it.d, 0, 15, 0, m, 1);
+      legs4(g, it.w, it.d, 15, 6, 3, solid(METAL));
+      const n = Math.max(2, Math.round(it.w / 45));
+      for (let i = 1; i < n; i++) box(g, 0.5, it.h - 21, 0.4, -it.w / 2 + it.w * i / n, 18, it.d / 2, solid(dark(it.color)));
+      for (let i = 0; i < n; i++) box(g, 1.2, 12, 2, -it.w / 2 + it.w * (i + 0.85) / n, it.h / 2, it.d / 2 + 1, CHROME);
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); },
+  },
+  mensola: {
+    name: 'Mensola', cat: 'Soggiorno', w: 80, d: 22, h: 30, elev: 150, color: '#c9a274',
+    build(g, it) {
+      box(g, it.w, 3, it.d, 0, 0, 0, solid(it.color, { rough: 0.5 }));
+      const cols = ['#7d4a3a', '#2f4858', '#d9a441', '#5f7f8c', '#ddd6c8'];
+      for (let i = 0; i < 6; i++) box(g, 3, 20 + (i * 7) % 8, it.d * 0.7, -it.w / 2 + 6 + i * 3.4, 3, 0, solid(cols[i % cols.length]));
+      cyl(g, 7, 16, it.w / 4, 3, 0, solid('#e9e4da', { rough: 0.6 }), 6);
+    },
+    draw(ctx, it) { ctx.setLineDash([4, 3]); box2d(ctx, it); ctx.setLineDash([]); },
+  },
+  quadro: {
+    name: 'Quadro', cat: 'Soggiorno', w: 80, d: 3, h: 60, elev: 130, color: '#2b2b2b', color2: '#5f7f8c',
+    build(g, it) {
+      box(g, it.w, it.h, it.d, 0, 0, 0, solid(it.color, { rough: 0.5 }));
+      box(g, it.w - 8, it.h - 8, 0.5, 0, 4, it.d / 2, solid(it.color2 || '#5f7f8c', { rough: 0.9 }));
+      box(g, (it.w - 8) * 0.4, (it.h - 8) * 0.5, 0.6, -(it.w - 8) * 0.15, 4 + (it.h - 8) * 0.2, it.d / 2, solid('#d9a441', { rough: 0.9 }));
+    },
+    draw(ctx, it) { rect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, '#333'); },
+  },
+  tvParete: {
+    name: 'TV a parete', cat: 'Soggiorno', w: 125, d: 5, h: 72, elev: 110, color: '#111111',
+    build(g, it) { box(g, it.w, it.h, it.d, 0, 0, 0, solid('#151515', { rough: 0.3 })); box(g, it.w - 3, it.h - 3, 0.3, 0, 1.5, it.d / 2, solid('#0b0d12', { rough: 0.05 })); },
+    draw(ctx, it) { rect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, '#333'); },
+  },
+  sgabello: {
+    name: 'Sgabello alto', cat: 'Pranzo', w: 38, d: 38, h: 75, color: '#3b3733', round: true,
+    build(g, it) {
+      cyl(g, it.w / 2, 4, 0, it.h - 4, 0, solid(it.color, { rough: 0.6 }));
+      for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4, r = it.w * 0.38; cyl(g, 1.2, it.h - 4, Math.cos(a) * r, 0, Math.sin(a) * r, solid(METAL)); }
+      cyl(g, it.w * 0.4, 1, 0, 25, 0, solid(METAL), it.w * 0.4, 24);
+    },
+    draw(ctx, it) { circ(ctx, 0, 0, it.w / 2, '#fff'); },
+  },
+  panca: {
+    name: 'Panca', cat: 'Pranzo', w: 120, d: 38, h: 45, color: '#c9a274',
+    build(g, it) { const m = solid(it.color, { rough: 0.5 }); box(g, it.w, 4, it.d, 0, it.h - 4, 0, m, 1); for (const s of [-1, 1]) box(g, 4, it.h - 4, it.d - 6, s * (it.w / 2 - 8), 0, 0, m); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); },
+  },
+  vetrina: {
+    name: 'Vetrina', cat: 'Pranzo', w: 90, d: 40, h: 190, color: '#f2efe9',
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.5 });
+      box(g, it.w, 80, it.d, 0, 0, 0, m);
+      for (const s of [-1, 1]) box(g, 2, it.h - 80, it.d, s * (it.w / 2 - 1), 80, 0, m);
+      box(g, it.w, 2, it.d, 0, it.h - 2, 0, m); box(g, it.w, it.h - 80, 1, 0, 80, -it.d / 2 + 0.5, m);
+      for (let i = 1; i < 4; i++) box(g, it.w - 4, 1, it.d - 3, 0, 80 + (it.h - 82) * i / 4, 0, GLASS);
+      box(g, it.w - 4, it.h - 84, 0.6, 0, 81, it.d / 2 - 0.5, GLASS);
+      for (let i = 0; i < 3; i++) cyl(g, 3, 12, -it.w / 4 + i * it.w / 4, 80 + (it.h - 82) / 4 + 1, 0, solid('#e9eef0', { rough: 0.1 }), 3.5, 16);
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); ctx.beginPath(); ctx.moveTo(-it.w / 2, it.d / 2 - 3); ctx.lineTo(it.w / 2, it.d / 2 - 3); ctx.stroke(); },
+  },
+  lavastoviglie: {
+    like: 'baseCucina', name: 'Lavastoviglie', w: 60,
+    extra(g, it) { box(g, it.w - 2, it.h - 18, 0.6, 0, 12, it.d / 2 - 0.2, solid('#c8c8c8', { metal: 0.6, rough: 0.3 })); box(g, it.w - 8, 3, 1, 0, it.h - 12, it.d / 2 + 0.3, solid('#222')); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); rect(ctx, -it.w / 2 + 4, it.d / 2 - 4, it.w - 8, 3, '#bbb'); },
+  },
+  cappa: {
+    name: 'Cappa', cat: 'Cucina', w: 60, d: 50, h: 60, elev: 155, color: '#c8c8c8',
+    build(g, it) {
+      const m = solid(it.color, { metal: 0.7, rough: 0.3 });
+      box(g, it.w, 8, it.d, 0, 0, 0, m);
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.11 * it.w / 60 * 1.2, it.w / 2 * M * 1.05, 18 * M, 4, 1), m);
+      c.rotation.y = Math.PI / 4; c.position.y = 17 * M; g.add(c);
+      box(g, 24, it.h - 26, 20, 0, 26, -it.d / 2 + 12, m);
+    },
+    draw(ctx, it) { ctx.setLineDash([4, 3]); box2d(ctx, it); ctx.setLineDash([]); rect(ctx, -12, -it.d / 2 + 2, 24, 20); },
+  },
+  isola: {
+    name: 'Isola cucina', cat: 'Cucina', w: 180, d: 90, h: 92, color: '#f2efe9', color2: '#3b3733',
+    build(g, it) {
+      const f = solid(it.color, { rough: 0.4 }), top = solid(it.color2 || '#3b3733', { rough: 0.3 });
+      box(g, it.w - 30, 10, it.d - 36, 0, 0, -12, solid('#222'));
+      box(g, it.w - 30, it.h - 14, it.d - 30, 0, 10, -12, f);
+      box(g, it.w, 4, it.d, 0, it.h - 4, 0, top);
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); rect(ctx, -it.w / 2 + 15, -it.d / 2 + 3, it.w - 30, it.d - 30); },
+  },
+  letto120: { like: 'letto2', name: 'Letto da una piazza e mezza', w: 120 },
+  specchioTerra: {
+    name: 'Specchio da terra', cat: 'Camera', w: 60, d: 30, h: 170, color: '#c9a274',
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.5 });
+      const p = new THREE.Group(); p.position.z = -it.d / 2 * M + 0.03; p.rotation.x = -0.12; g.add(p);
+      box(p, it.w, it.h, 3, 0, 0, 0, m); box(p, it.w - 8, it.h - 8, 0.5, 0, 4, 1.6, MIRROR);
+    },
+    draw(ctx, it) { rect(ctx, -it.w / 2, -it.d / 2, it.w, 6, '#ddd'); },
+  },
+  sediaUfficio: {
+    name: 'Sedia da ufficio', cat: 'Camera', w: 60, d: 60, h: 110, color: '#2b2b2b', round: true,
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.7 });
+      for (let i = 0; i < 5; i++) { const a = i * Math.PI * 2 / 5; const leg = box(g, 2.5, 2.5, it.w / 2 - 4, Math.cos(a) * it.w / 4, 5, Math.sin(a) * it.w / 4, solid(METAL)); leg.rotation.y = -a + Math.PI / 2; sphere(g, 2.5, Math.cos(a) * (it.w / 2 - 3), 2.5, Math.sin(a) * (it.w / 2 - 3), solid('#111')); }
+      cyl(g, 2.5, 38, 0, 7, 0, solid(METAL));
+      box(g, 48, 8, 46, 0, 45, 2, m, 3);
+      const back = box(g, 46, 55, 6, 0, 52, -it.d / 2 + 10, m, 3); back.rotation.x = -0.12;
+    },
+    draw(ctx, it) { circ(ctx, 0, 0, it.w / 2); rrect(ctx, -24, -21, 48, 46, 6, '#fff'); rect(ctx, -23, -it.d / 2 + 7, 46, 6); },
+  },
+  lavatrice: {
+    name: 'Lavatrice', cat: 'Bagno', w: 60, d: 60, h: 85, color: '#f7f7f5',
+    build(g, it) {
+      box(g, it.w, it.h, it.d, 0, 0, 0, solid(it.color, { rough: 0.3 }), 2);
+      const door = cyl(g, 16, 2, 0, 0, 0, solid('#9aa4ad', { metal: 0.6, rough: 0.2 }), 16, 32); door.rotation.x = Math.PI / 2; door.position.set(0, (it.h * 0.45) * M, (it.d / 2 + 1) * M);
+      const gl = cyl(g, 12, 2.2, 0, 0, 0, solid('#2a3540', { rough: 0.05 }), 12, 32); gl.rotation.x = Math.PI / 2; gl.position.set(0, (it.h * 0.45) * M, (it.d / 2 + 1.2) * M);
+      box(g, it.w - 6, 8, 1, 0, it.h - 12, it.d / 2, solid('#e2e2e0'));
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); circ(ctx, 0, it.d / 2 - 2, 14); },
+  },
+  termoarredo: {
+    name: 'Termoarredo', cat: 'Bagno', w: 50, d: 8, h: 120, elev: 15, color: '#f2efe9',
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.4, metal: 0.2 });
+      for (const s of [-1, 1]) cyl(g, 1.8, it.h, s * (it.w / 2 - 2), 0, 0, m, 1.8, 12);
+      const n = Math.round(it.h / 8);
+      for (let i = 0; i < n; i++) { const b = cyl(g, 1.1, it.w - 4, 0, 0, 0, m, 1.1, 10); b.rotation.z = Math.PI / 2; b.position.set(0, (4 + i * (it.h - 8) / (n - 1)) * M, 0); }
+    },
+    draw(ctx, it) { rect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, '#ddd'); },
+  },
+  specchio: {
+    name: 'Specchio a parete', cat: 'Bagno', w: 60, d: 3, h: 80, elev: 110, color: '#c8c8c8',
+    build(g, it) { box(g, it.w, it.h, it.d, 0, 0, 0, solid(it.color, { metal: 0.5, rough: 0.3 }), 1); box(g, it.w - 4, it.h - 4, 0.4, 0, 2, it.d / 2, MIRROR); },
+    draw(ctx, it) { rect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, '#bbb'); },
+  },
+  radiatore: {
+    name: 'Radiatore', cat: 'Varie', w: 80, d: 10, h: 60, elev: 12, color: '#f2efe9',
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.5 });
+      const n = Math.max(3, Math.round(it.w / 8));
+      for (let i = 0; i < n; i++) box(g, it.w / n - 1.5, it.h, it.d, -it.w / 2 + (i + 0.5) * it.w / n, 0, 0, m, 1);
+    },
+    draw(ctx, it) { rect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, '#ddd'); },
+  },
+  tenda: {
+    name: 'Tenda', cat: 'Varie', w: 140, d: 12, h: 250, color: '#e9e4da',
+    build(g, it) {
+      const n = Math.max(6, Math.round(it.w / 12)), m = solid(it.color, { rough: 1, side: THREE.DoubleSide });
+      const pos = [];
+      for (let i = 0; i <= n * 4; i++) { const x = -it.w / 2 + it.w * i / (n * 4); pos.push(x * M, Math.sin(i / 4 * Math.PI * 2) * it.d * 0.4 * M); }
+      const shape = new THREE.Shape(); shape.moveTo(pos[0], pos[1]);
+      for (let i = 2; i < pos.length; i += 2) shape.lineTo(pos[i], pos[i + 1]);
+      for (let i = pos.length - 2; i >= 0; i -= 2) shape.lineTo(pos[i], pos[i + 1] + 0.006);
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: (it.h - 6) * M, bevelEnabled: false });
+      geo.rotateX(-Math.PI / 2);
+      const c = new THREE.Mesh(geo, m); c.position.y = 2 * M; g.add(c);
+      const rod = cyl(g, 1, it.w + 10, 0, 0, 0, solid('#888', { metal: 0.6, rough: 0.3 })); rod.rotation.z = Math.PI / 2; rod.position.y = (it.h - 2) * M;
+    },
+    draw(ctx, it) { ctx.beginPath(); for (let x = -it.w / 2; x <= it.w / 2; x += 3) { const y = Math.sin((x + it.w / 2) / 12 * Math.PI * 2) * it.d * 0.4; if (x === -it.w / 2) ctx.moveTo(x, y); else ctx.lineTo(x, y); } ctx.stroke(); },
+  },
+  pianoforte: {
+    name: 'Pianoforte verticale', cat: 'Varie', w: 150, d: 60, h: 125, color: '#1a1a1a',
+    build(g, it) {
+      const m = solid(it.color, { rough: 0.15 });
+      box(g, it.w, it.h, 30, 0, 0, -it.d / 2 + 15, m, 1);
+      box(g, it.w, 6, it.d - 30, 0, 70, it.d / 2 - (it.d - 30) / 2, m);
+      box(g, it.w - 12, 2, 14, 0, 76, -it.d / 2 + 37, solid('#f4f1e8', { rough: 0.3 }));
+      for (let i = 0; i < 36; i++) if ([1, 2, 4, 5, 6].includes(i % 7)) box(g, 1.2, 1.5, 8, -it.w / 2 + 6 + (i + 0.5) * (it.w - 12) / 36 - 1.6, 78, -it.d / 2 + 34, solid('#111'));
+      for (const s of [-1, 1]) box(g, 4, 70, it.d - 30, s * (it.w / 2 - 2), 0, it.d / 2 - (it.d - 30) / 2, m);
+    },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); rect(ctx, -it.w / 2, -it.d / 2, it.w, 30, '#ddd'); },
+  },
   // Varie
   pianta: {
     name: 'Pianta', cat: 'Varie', w: 45, d: 45, h: 120, color: '#5d7a4a',
