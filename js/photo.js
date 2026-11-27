@@ -1,7 +1,7 @@
 // Foto della planimetria come sfondo: caricamento, raddrizzamento della prospettiva, taratura della
 // scala (a mano con due punti, o in automatico leggendo le quote scritte sul disegno), aggancio al
 // centro dei muri disegnati nella foto e spessore dei muri misurato sulla foto.
-import * as G from './geom.js?v=mwz0jl1g';
+import * as G from './geom.js?v=mwz29b10';
 
 const MAX_PX = 2400;
 

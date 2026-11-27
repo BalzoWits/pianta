@@ -3,9 +3,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { buildHouse } from './house3d.js?v=mwz0jl1g';
-import { GLASS } from './materials.js?v=mwz0jl1g';
-import { resolveLight, applyLamps, addFill, buildRenderScene, initRectLights } from './lighting.js?v=mwz0jl1g';
+import { buildHouse } from './house3d.js?v=mwz29b10';
+import { GLASS } from './materials.js?v=mwz29b10';
+import { resolveLight, applyLamps, addFill, buildRenderScene, initRectLights } from './lighting.js?v=mwz29b10';
 
 const M = 0.01;
 
@@ -340,6 +340,9 @@ export class View3D {
     this.ground.material.color.set(0xffffff);
   }
   async startTrace(opts = {}) {
+    // ogni avvio annulla quelli precedenti ancora in preparazione (opzioni cambiate in fretta)
+    const seq = this.traceSeq = (this.traceSeq || 0) + 1;
+    const stale = () => seq !== this.traceSeq;
     this.traceOpts = { bounces: 6, scale: 1, ...opts };
     // stili istantanei: niente path tracing
     if (this.traceOpts.style && this.traceOpts.style !== 'pt') {
@@ -358,33 +361,37 @@ export class View3D {
     this.tracing = true;
     if (this.gpuOk === undefined) {
       try {
-        const { webgpuAvailable } = await import('./render-gpu.js?v=mwz0jl1g');
+        const { webgpuAvailable } = await import('./render-gpu.js?v=mwz29b10');
         const r = await webgpuAvailable();
         this.gpuOk = r.ok; this.gpuWhy = r.why || '';
       } catch (e) { this.gpuOk = false; this.gpuWhy = 'il motore WebGPU non si è caricato (' + e.message + ')'; }
     }
+    if (stale()) return;
     if (this.gpuOk) {
       try {
         // un solo avvio del motore anche se il render parte due volte di fila (opzioni cambiate subito)
         if (!this.gpuReady) this.gpuReady = (async () => {
-          const { GpuTracer } = await import('./render-gpu.js?v=mwz0jl1g');
+          const { GpuTracer } = await import('./render-gpu.js?v=mwz29b10');
           const g = new GpuTracer(this.host, this);
           await g.init();
           this.gpu = g;
         })();
         try { await this.gpuReady; } catch (e) { this.gpuReady = null; throw e; }
-        if (!this.tracing) return;
+        if (!this.tracing || stale()) return;
         this.useGpu = true;
         this.gpu.resize();
         await this.gpu.setDenoise(this.traceOpts.denoise !== false);
+        if (stale()) return;
         this.gpu.setup(this.app.doc, this.light, this.traceOpts);
         this.gpu.start(this.onProgress);
         this.renderer.domElement.style.visibility = 'hidden';
         return;
       } catch (e) { console.warn('WebGPU non disponibile, uso WebGL', e); this.gpuOk = false; this.useGpu = false; this.gpuWhy = 'WebGPU si è fermato: ' + (e.message || e); if (this.gpu) { try { this.gpu.stop(); } catch (er) { /* niente */ } } }
     }
+    if (stale()) return;
     if (this.onSlow) this.onSlow();
     const { WebGLPathTracer, GradientEquirectTexture } = await import('three-gpu-pathtracer');
+    if (stale() || !this.tracing) return;
     this.rebuild(); // con i soffitti
     if (!this.pt) {
       this.pt = new WebGLPathTracer(this.renderer);
@@ -412,6 +419,7 @@ export class View3D {
     this.pt.setScene(this.ptScene.scene, this.camera);
   }
   stopTrace() {
+    this.traceSeq = (this.traceSeq || 0) + 1;
     if (this.renderMode) { this.renderMode = null; this.ground.material.color.set(0xcfd3c4); this.rebuild(); }
     if (!this.tracing) return;
     this.tracing = false;
@@ -422,6 +430,8 @@ export class View3D {
   }
   snapshot() {
     if (this.useGpu) return this.gpu.snapshot();
+    // vista normale e stili istantanei: si ridisegna adesso, cosi' l'immagine e' esattamente quella a schermo
+    if (!this.tracing) this.renderer.render(this.scene, this.camera);
     return this.renderer.domElement.toDataURL('image/png');
   }
 }

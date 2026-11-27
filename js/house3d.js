@@ -1,9 +1,9 @@
 // Costruisce la casa in 3D dal documento: pareti (con i fori di porte e finestre), pavimenti, soffitti,
 // serramenti e mobili. Pianta in cm (x, y) -> three.js in metri (x, z), y verso l'alto.
 import * as THREE from 'three';
-import * as G from './geom.js?v=mwz0jl1g';
-import { solid, floorMaterial, GLASS, CHROME } from './materials.js?v=mwz0jl1g';
-import { buildItem } from './furniture.js?v=mwz0jl1g';
+import * as G from './geom.js?v=mwz29b10';
+import { solid, floorMaterial, GLASS, CHROME } from './materials.js?v=mwz29b10';
+import { buildItem } from './furniture.js?v=mwz29b10';
 
 const M = 0.01;
 
