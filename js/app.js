@@ -3,9 +3,9 @@ import * as G from './geom.js';
 import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js';
 import { View3D } from './view3d.js';
 import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js';
-import { LIGHT_PRESETS, resolveLight } from './lighting.js';
+import { LIGHT_PRESETS, resolveLight, fmtTime } from './lighting.js';
 import { itemThumb } from './thumbs.js';
-import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS } from './materials.js';
+import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS, FINISHES, finishCss } from './materials.js';
 import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js';
 import { skewAngle, rotateImage, detectWalls } from './detect.js';
 import * as MD from './models.js';
@@ -158,6 +158,7 @@ const ICONS = {
   door: '<path d="M4 20h16M6 20V4h7v16"/><path d="M13 4a9 9 0 0 1 7 9"/>',
   window: '<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M12 4v16M4 12h16"/>',
   dim: '<path d="M3 12h18M3 8v8M21 8v8M7 10l-4 2 4 2M17 10l4 2-4 2"/>',
+  divider: '<path d="M3 21V3h18v18z" opacity=".35"/><path d="M12 3v18" stroke-dasharray="3 2.5"/>',
   furniture: '<path d="M4 18v-6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6M4 15h16M6 18v2M18 18v2M7 10V7a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v3"/>',
   photo: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-8 8"/>',
   fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
@@ -170,7 +171,7 @@ const ICONS = {
 };
 const icon = k => `<svg viewBox="0 0 24 24">${ICONS[k]}</svg>`;
 const TOOLS_2D = [
-  ['select', 'Seleziona', 'V'], ['wall', 'Pareti', 'W'], ['rect', 'Stanza', 'R'], ['door', 'Porte', 'D'], ['window', 'Finestre', 'F'],
+  ['select', 'Seleziona', 'V'], ['wall', 'Pareti', 'W'], ['rect', 'Stanza', 'R'], ['divider', 'Divisore', 'L'], ['door', 'Porte', 'D'], ['window', 'Finestre', 'F'],
   ['dim', 'Quota', 'Q'], ['furniture', 'Arredi', 'M'], ['photo', 'Da foto', 'P'], '-', ['fit', 'Inquadra', 'Home'],
 ];
 let curTool = 'select';
@@ -213,6 +214,7 @@ function pickTool(k) {
   else if (k === 'window') { curTool = 'opening'; if (!(openingType === 'window' || openingType === 'french')) openingType = 'window'; plan.setTool('opening', { type: openingType }); }
   else if (k === 'furniture') { curTool = 'place'; plan.setTool('select'); placeKind = null; }
   else if (k === 'photo') { curTool = 'photo'; plan.setTool('photo'); photo.setMode(app.doc.background ? 'move' : null); }
+  else if (k === 'divider') { curTool = 'divider'; plan.setTool('wall', { virtual: true }); }
   else { curTool = k; plan.setTool(k, k === 'wall' ? { thickness: wallTool.thickness, photoThick: wallTool.photoThick } : {}); }
   if (k !== 'photo' && photo.mode) photo.setMode(null);
   if (k !== 'select') setSel(null);
@@ -229,6 +231,7 @@ function setHint() {
     select: 'Clic per selezionare · trascina per spostare · doppio clic su una misura per cambiarla · clic in una stanza per nome e pavimento',
     wall: 'Clic per iniziare e a ogni angolo · scrivi la lunghezza e premi Invio · doppio clic o Esc per finire · Alt = senza agganci',
     rect: 'Trascina da un angolo all’altro per creare una stanza rettangolare',
+    divider: 'Disegna una linea che divide un ambiente in due stanze (es. zona cucina): si aggancia alle pareti · doppio clic o Esc per finire',
     opening: 'Clic su una parete per inserire · il lato del cursore decide verso dove si apre',
     dim: 'Clic sul primo punto, clic sul secondo, poi sposta e clicca per la distanza della quota',
     place: placeKind ? 'Clic per posare · vicino a un muro si appoggia da solo · Esc per annullare' : 'Scegli un arredo dal pannello',
@@ -338,6 +341,15 @@ function rangeField(label, value, min, max, step, onSet, fmt = v => v) {
 }
 // ---------- colori: tinte pronte, rotella e codice esadecimale ----------
 let swIdx = 0, wheelOpen = null;
+/** Colori + finiture (metalli ed effetti legno) per i mobili. */
+function finishes(cur, onPick) {
+  const wrap = h('div', {});
+  wrap.append(swatches(ITEM_COLORS, cur, onPick));
+  const box = h('div', { class: 'sw finishes' });
+  for (const [k, f] of Object.entries(FINISHES)) box.append(h('button', { type: 'button', class: k === cur ? 'on' : '', title: f.name, style: `background:${finishCss(k)}`, onclick: () => onPick(k) }));
+  wrap.append(h('p', { class: 'swlabel' }, cur && FINISHES[cur] ? 'Finitura: ' + FINISHES[cur].name : 'Legni e metalli:'), box);
+  return wrap;
+}
 function swatches(colors, cur, onPick) {
   const key = swIdx++;
   const wrap = h('div', { class: 'swwrap' });
@@ -438,6 +450,7 @@ function renderPanel() {
   }
   if (app.view === 'render') return panelRender();
   if (app.view === '3d') return panelMode === 'catalog' ? panelCatalog() : panel3D();
+  if (curTool === 'divider') return panelDividerTool();
   if (curTool === 'wall' || curTool === 'rect') return panelWallTool();
   if (curTool === 'opening') return panelOpeningTool();
   if (curTool === 'place') return panelCatalog();
@@ -517,6 +530,13 @@ function panelHouse() {
   panel.append(numField('Griglia di aggancio', S.grid, setVal(v => { S.grid = v; }, 'Griglia'), { min: 0, max: 100 }));
   panel.append(checkField('Mostra le quote', S.showDims, setVal(v => { S.showDims = v; }, 'Quote')));
   panel.append(checkField('Mostra le superfici', S.showAreas, setVal(v => { S.showAreas = v; }, 'Superfici')));
+  panel.append(h('h3', {}, 'Orientamento'));
+  panel.append(rangeField('Direzione del nord', S.north || 0, 0, 359, 1, (v, fin) => { S.north = v; plan.redraw(); if (fin) { commit('Nord'); view.setLight({}); } }, v => v + '°'));
+  panel.append(h('p', {}, 'La rosa dei venti in alto a destra nella pianta mostra il nord: serve per la posizione del sole nel render.'));
+  const lat = h('select', {}, ...[['46.5', 'Nord Italia (Alpi)'], ['45.5', 'Nord Italia'], ['43.8', 'Centro Italia'], ['41.5', 'Lazio, Campania'], ['39', 'Sud Italia'], ['37.5', 'Sicilia']].map(([v, n]) => h('option', { value: v }, n)));
+  lat.value = String([46.5, 45.5, 43.8, 41.5, 39, 37.5].reduce((a, b) => Math.abs(b - (S.lat ?? 45)) < Math.abs(a - (S.lat ?? 45)) ? b : a));
+  lat.addEventListener('change', () => { S.lat = +lat.value; commit('Latitudine'); view.setLight({}); });
+  panel.append(h('label', { class: 'field' }, h('span', {}, 'Zona'), lat));
   panel.append(h('h3', {}, 'Facciata esterna'));
   panel.append(swatches(['#e9e4da', '#f4f1ea', '#d9c8a9', '#c98c6c', '#b5b0a5', '#8a8f94'], S.exteriorColor, setVal(c => { S.exteriorColor = c; }, 'Colore esterno')));
   panel.append(h('h3', {}, 'Scorciatoie'));
@@ -553,6 +573,13 @@ function panelWallTool() {
   }
 }
 
+function panelDividerTool() {
+  panel.append(h('h2', {}, 'Divisore di stanza'));
+  panel.append(h('p', {}, 'Una linea tratteggiata che divide un ambiente senza muro: per esempio la zona cucina del soggiorno, un ingresso aperto o la zona notte di un open space. Ogni parte diventa una stanza a sé, con il suo nome, il suo pavimento e la sua superficie. In 3D non si vede.'));
+  panel.append(h('p', {}, 'Clicca su una parete, poi sull’altra parete di fronte: la linea si aggancia da sola. Doppio clic o Esc per finire.'));
+  panel.append(h('div', { class: 'row' }, btn('Fine (Esc)', () => plan.finishWall())));
+}
+
 function panelOpeningTool() {
   panel.append(h('h2', {}, 'Porte e finestre'));
   panel.append(h('p', {}, 'Scegli il tipo e clicca su una parete.'));
@@ -571,6 +598,7 @@ function openingIcon(type) {
   if (type === 'door') { x.moveTo(14, 25); x.lineTo(14, 3); x.arc(14, 25, 22, -Math.PI / 2, 0); }
   else if (type === 'door2') { x.moveTo(14, 25); x.lineTo(14, 11); x.arc(14, 25, 14, -Math.PI / 2, 0); x.moveTo(42, 25); x.lineTo(42, 11); x.arc(42, 25, 14, -Math.PI / 2, Math.PI, true); }
   else if (type === 'slide') { x.lineWidth = 3; x.moveTo(4, 18); x.lineTo(30, 18); }
+  else if (type === 'pocket') { x.stroke(); x.beginPath(); x.strokeStyle = '#e8590c'; x.lineWidth = 3; x.moveTo(4, 25); x.lineTo(24, 25); }
   else if (type === 'window' || type === 'french') { x.rect(14, 22, 28, 6); x.moveTo(14, 25); x.lineTo(42, 25); if (type === 'french') { x.moveTo(14, 22); x.arc(14, 22, 14, -Math.PI / 2, 0); } }
   else { x.setLineDash([3, 2]); x.moveTo(14, 25); x.lineTo(42, 25); }
   x.stroke();
@@ -580,6 +608,12 @@ function openingIcon(type) {
 function panelWall(w) {
   const d = app.doc;
   const L = G.wallLength(d, w);
+  if (w.virtual) {
+    panel.append(h('h2', {}, 'Divisore di stanza'));
+    panel.append(h('p', {}, 'Divide il pavimento in due stanze senza muro. Lunghezza ' + fmtCm(L) + ' cm.'));
+    panel.append(h('div', { class: 'row' }, btn('Trasformalo in parete', () => { delete w.virtual; w.thickness = d.settings.wallThickness; commit('Parete'); }), btn('Elimina', deleteSel, 'danger')));
+    return;
+  }
   panel.append(h('h2', {}, 'Parete'));
   panel.append(numField('Lunghezza (asse)', L, setVal(v => stretchWall(w, v - L), 'Lunghezza parete'), { min: 5 }));
   const mode = h('select', {}, h('option', { value: 'stretch' }, 'sposta tutto ciò che c’è oltre'), h('option', { value: 'end' }, 'sposta solo l’estremo'));
@@ -593,6 +627,7 @@ function panelWall(w) {
   panel.append(h('p', {}, `Lato sinistro ${fmtCm(G.dist(c.aL, c.bL))} cm · lato destro ${fmtCm(G.dist(c.aR, c.bR))} cm`));
   panel.append(h('div', { class: 'row' },
     btn('Dividi a metà', () => { const A = G.nodeById(d, w.a), B = G.nodeById(d, w.b); G.splitWall(d, w, G.mul(G.add(A, B), 0.5)); commit('Dividi parete'); }),
+    btn('Rendi divisore', () => { w.virtual = true; w.thickness = 2; d.openings = d.openings.filter(o => o.wall !== w.id); commit('Divisore'); }),
     btn('Elimina', deleteSel, 'danger')));
 }
 let stretchMode = 'stretch';
@@ -632,10 +667,24 @@ function panelOpening(o) {
   const sa = Math.max(G.toLocal(c, c.aL).s, G.toLocal(c, c.aR).s), sb = Math.min(G.toLocal(c, c.bL).s, G.toLocal(c, c.bR).s);
   panel.append(numField('Dall’angolo a sinistra', o.pos - o.width / 2 - sa, setVal(v => { o.pos = sa + v + o.width / 2; }, 'Posizione'), { min: 0, max: L }));
   panel.append(numField('Dall’angolo a destra', sb - (o.pos + o.width / 2), setVal(v => { o.pos = sb - v - o.width / 2; }, 'Posizione'), { min: 0, max: L }));
-  if (o.type === 'door' || o.type === 'door2' || o.type === 'slide' || o.type === 'french') {
+  if (o.type === 'slide' || o.type === 'pocket') {
+    panel.append(h('div', { class: 'row' },
+      btn('Scorre dall’altra parte', () => { o.hinge = o.hinge === 'b' ? 'a' : 'b'; commit('Verso'); }),
+      o.type === 'slide' ? btn('Anta sull’altro lato del muro', () => { o.swing = o.swing === 'R' ? 'L' : 'R'; commit('Lato anta'); }) : null));
+    panel.append(rangeField('Quanto è aperta', Math.round((o.slide ?? (o.type === 'pocket' ? 0.85 : 0.6)) * 100), 0, 100, 5, (v, fin) => { o.slide = v / 100; plan.redraw(); if (fin) commit('Apertura'); }, v => v + '%'));
+    if (o.type === 'pocket') {
+      // nel muro serve spazio per l'anta, dal lato verso cui scorre
+      const c2 = G.wallCorners(d).get(w.id);
+      const room = o.hinge === 'b' ? Math.min(G.toLocal(c2, c2.bL).s, G.toLocal(c2, c2.bR).s) - (o.pos + o.width / 2) : (o.pos - o.width / 2) - Math.max(G.toLocal(c2, c2.aL).s, G.toLocal(c2, c2.aR).s);
+      if (room < o.width) panel.append(h('div', { class: 'callout' }, `Da quel lato nel muro ci sono solo ${fmtCm(Math.max(0, room))} cm: per far sparire l’anta ne servono ${fmtCm(o.width)}. Fai scorrere dall’altra parte o sposta la porta.`));
+    }
+  }
+  if (o.type === 'door' || o.type === 'door2' || o.type === 'french') {
     panel.append(h('div', { class: 'row' },
       btn('Apri dall’altro lato', () => { o.swing = o.swing === 'R' ? 'L' : 'R'; commit('Verso'); }),
       o.type === 'door' ? btn('Cerniera opposta', () => { o.hinge = o.hinge === 'b' ? 'a' : 'b'; commit('Cerniera'); }) : null));
+  }
+  if (o.type === 'door' || o.type === 'door2' || o.type === 'slide' || o.type === 'pocket' || o.type === 'french') {
     if (o.type === 'door' || o.type === 'door2') panel.append(rangeField('Apertura in 3D', o.open ?? 90, 0, 120, 5, (v, fin) => { o.open = v; if (fin) commit('Apertura'); }, v => v + '°'));
     panel.append(h('h3', {}, 'Colore'));
     panel.append(swatches(['#efebe3', '#ffffff', '#c9a274', '#7a5a3f', '#4a3a2c', '#3e4550', '#9aa7b3'], o.color || '#efebe3', setVal(c => { o.color = c; }, 'Colore porta')));
@@ -737,13 +786,26 @@ function panelItem(it) {
   }
   panel.append(nums);
   panel.append(checkField('Mantieni le proporzioni', lock, setVal(v => { it.lock = v; }, 'Proporzioni')));
-  if (cat.light !== 'ceiling') panel.append(numField('Da terra', it.elev || 0, setVal(v => { it.elev = v; }, 'Altezza da terra'), { min: 0, max: 400 }));
+  if (cat.bases) {
+    const NAMES = { legs: 'Con piedini', floor: 'A terra', wall: 'Sospeso', hung: 'Sospeso', hungcab: 'Mobile sospeso', floorcab: 'Mobile a terra' };
+    if (it.kind === 'lavabo') NAMES.hung = 'Solo lavabo sospeso';
+    panel.append(h('h3', {}, 'Base'));
+    panel.append(h('div', { class: 'row' }, ...cat.bases.map(b => btn(NAMES[b], () => {
+      const was = it.base;
+      it.base = b;
+      if (b === 'wall' && !(it.elev > 0)) it.elev = cat.wallElev || 30;
+      if (was === 'wall' && b !== 'wall') it.elev = 0;
+      commit('Base');
+    }, (it.base || cat.bases[0]) === b ? 'on' : ''))));
+  }
+  if (it.kind === 'mobileTV' || it.kind === 'mobileBasso') panel.append(checkField('Con televisore', it.tv !== false, setVal(v => { it.tv = v; }, 'Televisore')));
+  if (cat.light !== 'ceiling') panel.append(numField(it.base === 'wall' ? 'Da terra (sospeso)' : 'Da terra', it.elev || 0, setVal(v => { it.elev = v; }, 'Altezza da terra'), { min: 0, max: 400 }));
   panel.append(numField('Rotazione', it.rot, setVal(v => { it.rot = ((v % 360) + 360) % 360; }, 'Ruota'), { unit: '°', min: -360, max: 720 }));
   panel.append(h('div', { class: 'row' }, btn('↺ 90°', () => { it.rot = (it.rot + 270) % 360; commit('Ruota'); }), btn('↻ 90°', () => { it.rot = (it.rot + 90) % 360; commit('Ruota'); })));
   if (model && model.col && !model.single) {
     panel.append(h('h3', {}, 'Colore'));
     panel.append(h('div', { class: 'row' }, btn('Colori del file', () => { it.paint = false; commit('Colore modello'); }, !it.paint ? 'on' : ''), btn('Tinta unica', () => { it.paint = true; commit('Colore modello'); }, it.paint ? 'on' : '')));
-    if (it.paint) panel.append(swatches(ITEM_COLORS, it.color, setVal(c => { it.color = c; }, 'Colore')));
+    if (it.paint) panel.append(finishes(it.color, setVal(c => { it.color = c; }, 'Colore')));
   }
   if (model) panel.append(checkField('È una lampada (fa luce)', !!it.glow, setVal(v => { it.glow = v; if (v && it.on === undefined) Object.assign(it, { on: true, power: 1, lightColor: '#ffd9a8' }); }, 'Lampada')));
   if (isLamp(it)) {
@@ -755,12 +817,12 @@ function panelItem(it) {
     panel.append(h('p', {}, 'Le lampade si vedono accese con l’illuminazione «Sera» o «Tramonto», oppure con «Lampade accese» nel pannello del render.'));
   }
   if (!model || model.single || !model.col) {
-    panel.append(h('h3', {}, 'Colore'));
-    panel.append(swatches(ITEM_COLORS, it.color, setVal(c => { it.color = c; }, 'Colore')));
+    panel.append(h('h3', {}, 'Colore e finitura'));
+    panel.append(finishes(it.color, setVal(c => { it.color = c; }, 'Colore')));
   }
   if (it.color2 != null) {
-    panel.append(h('h3', {}, it.kind.startsWith('letto') ? 'Struttura' : 'Piano'));
-    panel.append(swatches(ITEM_COLORS, it.color2, setVal(c => { it.color2 = c; }, 'Colore')));
+    panel.append(h('h3', {}, it.kind.startsWith('letto') ? 'Struttura' : it.kind === 'quadro' ? 'Dipinto' : 'Piano'));
+    panel.append(finishes(it.color2, setVal(c => { it.color2 = c; }, 'Colore')));
   }
   if (model) {
     panel.append(h('h3', {}, 'Raddrizza il modello'));
@@ -772,7 +834,7 @@ function panelItem(it) {
 function panelRoom(r) {
   const info = roomsInfo().find(f => f.label === r || (f.label && f.label.id === r.id));
   panel.append(h('h2', {}, 'Stanza'));
-  const name = h('input', { type: 'text', value: r.name || '', list: 'roomNames', placeholder: 'Nome', class: 'wide' });
+  const name = h('input', { type: 'text', value: r.name || '', list: 'roomNames', placeholder: 'Nome della stanza (es. Cucina)', class: 'wide', id: 'roomName' });
   name.addEventListener('change', () => { r.name = name.value.trim(); commit('Nome stanza'); });
   const dl = h('datalist', { id: 'roomNames' }, ...['Soggiorno', 'Cucina', 'Soggiorno con cucina', 'Sala da pranzo', 'Camera', 'Camera matrimoniale', 'Cameretta', 'Studio', 'Bagno', 'Lavanderia', 'Ingresso', 'Disimpegno', 'Corridoio', 'Ripostiglio', 'Cabina armadio', 'Balcone', 'Terrazzo', 'Garage', 'Cantina'].map(n => h('option', { value: n })));
   panel.append(h('div', { class: 'row' }, name, dl));
@@ -816,17 +878,22 @@ function panelDim(dm) {
 
 /** Sezione «Illuminazione»: preset, sole, lampade, luce diffusa ed esposizione (vista 3D e render). */
 function lightSection(live) {
-  const L = view.light, Rl = resolveLight(L);
+  const L = view.light, Rl = resolveLight({ ...L, north: app.doc.settings.north || 0, lat: app.doc.settings.lat ?? 45 });
   const set = (o, fin) => { Object.assign(L, o); if (fin !== false || live) view.setLight({}); };
   panel.append(h('h3', {}, 'Illuminazione'));
   const pr = h('div', { class: 'presets' });
-  for (const [k, P] of Object.entries(LIGHT_PRESETS)) pr.append(h('button', { type: 'button', class: 'btn' + (L.preset === k ? ' on' : ''), title: P.hint, onclick: () => { L.preset = k; L.sunElOverride = false; L.fillScale = 1; L.expScale = 1; view.setLight({}); renderTools(); renderPanel(); } }, P.name));
+  for (const [k, P] of Object.entries(LIGHT_PRESETS)) pr.append(h('button', { type: 'button', class: 'btn' + (L.preset === k ? ' on' : ''), title: P.hint, onclick: () => { L.preset = k; if (typeof P.time === 'number') L.time = P.time; if (P.night) L.time = 21.5; L.fillScale = 1; L.expScale = 1; view.setLight({}); renderTools(); renderPanel(); } }, P.name));
   panel.append(pr);
   panel.append(h('p', {}, (LIGHT_PRESETS[L.preset] || LIGHT_PRESETS.auto).hint + '.'));
-  if (Rl.day && Rl.sun > 0) {
-    panel.append(rangeField('Direzione del sole', L.sunAz, 0, 360, 5, (v, fin) => set({ sunAz: v }, fin), v => v + '°'));
-    panel.append(rangeField('Altezza del sole', Rl.sunEl, 3, 85, 1, (v, fin) => set({ sunEl: v, sunElOverride: true }, fin), v => v + '°'));
+  if (!(LIGHT_PRESETS[L.preset] || {}).noSun && L.preset !== 'tramonto' && L.preset !== 'sera') {
+    panel.append(rangeField('Ora del giorno', L.time ?? 11, 5, 22, 0.25, (v, fin) => set({ time: v }, fin), fmtTime));
   }
+  const mo = h('select', {}, ...['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'].map((n, i) => h('option', { value: i + 1 }, n)));
+  mo.value = String(L.month || 6);
+  mo.addEventListener('change', () => { set({ month: +mo.value }); renderPanel(); });
+  panel.append(h('label', { class: 'field' }, h('span', {}, 'Mese'), mo));
+  if (Rl.day && Rl.sun > 0) panel.append(h('p', {}, `Sole a ${Math.round(Rl.sunEl)}° sull’orizzonte, da ${['nord', 'nord-est', 'est', 'sud-est', 'sud', 'sud-ovest', 'ovest', 'nord-ovest'][Math.round(((Rl.sunAz - (app.doc.settings.north || 0) + 360) % 360) / 45) % 8]}. Il nord della casa si imposta nel pannello «Casa» della pianta.`));
+  else if (!Rl.day) panel.append(h('p', {}, 'A quest’ora il sole è tramontato: la luce viene dalle lampade.'));
   panel.append(rangeField('Luce diffusa nella stanza', L.fillScale ?? 1, 0, 3, 0.1, (v, fin) => set({ fillScale: v }, fin), v => v.toFixed(1).replace('.', ',') + '×'));
   panel.append(checkField('Lampade accese', Rl.lampsOn, v => { set({ lampsDay: v && !(LIGHT_PRESETS[L.preset] || {}).lamps }); if (!v && (LIGHT_PRESETS[L.preset] || {}).lamps) toast('Con questo preset le lampade sono accese: puoi spegnerle una per una nel pannello della lampada'); renderPanel(); }));
   if (Rl.lampsOn) panel.append(rangeField('Potenza di tutte le lampade', L.lamps ?? 1, 0.2, 4, 0.1, (v, fin) => set({ lamps: v }, fin), v => v.toFixed(1).replace('.', ',') + '×'));
@@ -1161,7 +1228,7 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (app.view !== '2d') return;
-  const map = { v: 'select', w: 'wall', r: 'rect', d: 'door', f: 'window', q: 'dim', m: 'furniture', p: 'photo' };
+  const map = { v: 'select', w: 'wall', r: 'rect', l: 'divider', d: 'door', f: 'window', q: 'dim', m: 'furniture', p: 'photo' };
   if (map[k]) pickTool(map[k]);
   if (e.key === 'Home') plan.fit();
 });

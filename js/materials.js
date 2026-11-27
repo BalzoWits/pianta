@@ -183,11 +183,65 @@ function marble(c, base, vein) {
   ctx.fillRect(0, 0, S, 1); ctx.fillRect(0, 0, 1, S); ctx.fillRect(0, S / 2, S, 1); ctx.fillRect(S / 2, 0, 1, S);
 }
 
+// ---------- finiture (al posto di un colore: "wood:..." o "metal:...") ----------
+export const FINISHES = {
+  'wood:frassino': { name: 'Frassino bianco', kind: 'wood', base: '#e6dccb', grain: '#b9a684' },
+  'wood:rovere': { name: 'Rovere', kind: 'wood', base: '#cfa776', grain: '#9a7344' },
+  'wood:teak': { name: 'Teak', kind: 'wood', base: '#a8743f', grain: '#6e4720' },
+  'wood:ciliegio': { name: 'Ciliegio', kind: 'wood', base: '#a35f3d', grain: '#6a3520' },
+  'wood:noce': { name: 'Noce', kind: 'wood', base: '#6e4a30', grain: '#3f2716' },
+  'wood:wenge': { name: 'Wengé', kind: 'wood', base: '#3e2c22', grain: '#1e140f' },
+  'metal:acciaio': { name: 'Acciaio', kind: 'metal', base: '#c4c8cc', rough: 0.28 },
+  'metal:satinato': { name: 'Acciaio satinato', kind: 'metal', base: '#b4b8bc', rough: 0.5 },
+  'metal:alluminio': { name: 'Alluminio', kind: 'metal', base: '#d9dbdd', rough: 0.4 },
+  'metal:ottone': { name: 'Ottone', kind: 'metal', base: '#c9a24c', rough: 0.32 },
+  'metal:rame': { name: 'Rame', kind: 'metal', base: '#c27a55', rough: 0.35 },
+  'metal:nero': { name: 'Metallo nero', kind: 'metal', base: '#2e2e30', rough: 0.45 },
+};
+export const finishBase = c => (FINISHES[c] ? FINISHES[c].base : c);
+const woodCache = new Map();
+function woodTex(key) {
+  if (woodCache.has(key)) return woodCache.get(key);
+  const f = FINISHES[key];
+  const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+  const x = c.getContext('2d');
+  x.fillStyle = f.base; x.fillRect(0, 0, 256, 256);
+  let sd = 13;
+  const r = () => { sd = (sd * 16807) % 2147483647; return (sd - 1) / 2147483646; };
+  // venature: linee ondulate lungo la tavola
+  for (let i = 0; i < 70; i++) {
+    x.strokeStyle = f.grain; x.globalAlpha = 0.08 + r() * 0.22; x.lineWidth = 0.6 + r() * 2.2;
+    let y = r() * 256; x.beginPath(); x.moveTo(0, y);
+    for (let k = 1; k <= 16; k++) { y += (r() - 0.5) * 4; x.lineTo(k * 16, y + Math.sin(k * 0.8 + i) * 2); }
+    x.stroke();
+  }
+  x.globalAlpha = 1;
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  woodCache.set(key, t);
+  return t;
+}
+/** Campione (CSS background) di una finitura, per i pulsanti del pannello. */
+export function finishCss(key) {
+  const f = FINISHES[key];
+  if (!f) return key;
+  if (f.kind === 'metal') return `linear-gradient(135deg, ${f.base}, #ffffff 45%, ${f.base} 60%, #7d8186)`;
+  return `repeating-linear-gradient(8deg, ${f.base} 0 3px, ${f.grain} 3px 4px, ${f.base} 4px 7px)`;
+}
+
 // ---------- materiali ----------
 const matCache = new Map();
 export function solid(color, opts = {}) {
   const key = color + JSON.stringify(opts);
   if (matCache.has(key)) return matCache.get(key);
+  const F = FINISHES[color];
+  if (F) {
+    const m = F.kind === 'metal'
+      ? new THREE.MeshStandardMaterial({ color: F.base, metalness: 1, roughness: F.rough, side: opts.side ?? THREE.FrontSide })
+      : new THREE.MeshStandardMaterial({ color: 0xffffff, map: woodTex(color), roughness: 0.55, side: opts.side ?? THREE.FrontSide });
+    matCache.set(key, m);
+    return m;
+  }
   const m = new THREE.MeshStandardMaterial({ color, roughness: opts.rough ?? 0.8, metalness: opts.metal ?? 0, emissive: opts.emissive || 0x000000, emissiveIntensity: opts.ei ?? 1, side: opts.side ?? THREE.FrontSide });
   matCache.set(key, m);
   return m;

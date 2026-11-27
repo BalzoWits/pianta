@@ -127,6 +127,7 @@ export function addWall(doc, p1, p2, props = {}) {
     if (a === b) continue;
     if (doc.walls.some(w => (w.a === a.id && w.b === b.id) || (w.a === b.id && w.b === a.id))) continue;
     const w = { id: newId('w'), a: a.id, b: b.id, thickness: props.thickness ?? doc.settings.wallThickness, height: props.height ?? null };
+    if (props.virtual) w.virtual = true; // divisore: separa le stanze ma non e' un muro
     doc.walls.push(w);
     made.push(w);
   }
@@ -150,7 +151,7 @@ export function cleanup(doc) {
       const inc = doc.walls.filter(w => w.a === n.id || w.b === n.id);
       if (inc.length !== 2) continue;
       const [w1, w2] = inc;
-      if (Math.abs(w1.thickness - w2.thickness) > 0.01 || (w1.height || 0) !== (w2.height || 0)) continue;
+      if (Math.abs(w1.thickness - w2.thickness) > 0.01 || (w1.height || 0) !== (w2.height || 0) || !!w1.virtual !== !!w2.virtual) continue;
       const o1 = nodeById(doc, w1.a === n.id ? w1.b : w1.a), o2 = nodeById(doc, w2.a === n.id ? w2.b : w2.a);
       const d1 = norm(sub(n, o1)), d2 = norm(sub(o2, n));
       if (Math.abs(cross(d1, d2)) > 1e-4 || dot(d1, d2) < 0) continue;

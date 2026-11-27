@@ -83,6 +83,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .sw { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .sw button { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); cursor: pointer; padding: 0; }
 .sw button.on { box-shadow: 0 0 0 2px var(--accent); }
+.swlabel { margin: 8px 0 2px !important; font-size: 12px; }
+.sw.finishes button { border-radius: 7px; }
 .sw .wheelbtn { background: conic-gradient(#f33, #ff3, #3f3, #3ff, #33f, #f3f, #f33); }
 .wheel { display: flex; gap: 12px; align-items: center; margin: 6px 0 4px; flex-wrap: wrap; }
 .wheel canvas { width: 150px; height: 150px; touch-action: none; cursor: crosshair; }

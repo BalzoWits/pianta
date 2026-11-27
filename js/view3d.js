@@ -52,7 +52,7 @@ export class View3D {
     this.houseGroup = null;
     this.mode = 'orbit';   // 'orbit' | 'walk'
     this.lowWalls = false;
-    this.light = { preset: 'auto', mode: 'day', sunAz: 135, sunEl: 40, lamps: 1 };
+    this.light = { preset: 'auto', mode: 'day', time: 11, month: new Date().getMonth() + 1, lamps: 1 };
     initRectLights();
     this.pt = null; this.tracing = false;
     this.renderExposure = 1.6;
@@ -151,7 +151,7 @@ export class View3D {
 
   setLight(opts) { Object.assign(this.light, opts); this._applyLights(); if (this.tracing) this._resetTrace(true); }
   _applyLights() {
-    const L = this.light, R = resolveLight(L), day = R.day;
+    const L = this.light, R = resolveLight({ ...L, north: this.app.doc.settings.north || 0, lat: this.app.doc.settings.lat ?? 45 }), day = R.day;
     L.mode = day ? 'day' : 'night';
     const az = R.sunAz * Math.PI / 180, el = R.sunEl * Math.PI / 180;
     const c = this.bounds && !this.bounds.isEmpty() ? this.bounds.getCenter(new THREE.Vector3()) : new THREE.Vector3();
@@ -167,7 +167,7 @@ export class View3D {
     this.sun.visible = day && R.sun > 0;
     this.hemi.intensity = day ? (R.sun > 0 ? 0.75 : 1.4) : 0.12;
     this.scene.environmentIntensity = day ? 0.35 : 0.06;
-    this.scene.background = new THREE.Color(day ? (R.sunColor === '#ffad66' ? 0xf0c9a0 : 0xdfe6ec) : 0x1c2230);
+    this.scene.background = new THREE.Color(day ? (R.warmSky ? 0xf0c9a0 : 0xdfe6ec) : 0x1c2230);
     if (this.houseGroup) {
       applyLamps(this.houseGroup, R, 1);
       // luce di riempimento anche nella vista (solo nella passeggiata e negli stili Veloce)

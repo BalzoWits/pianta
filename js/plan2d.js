@@ -16,7 +16,8 @@ const NOSNAP = new Set(['tappeto', 'lampadario', 'lampadaTerra', 'tavolo', 'tavo
 export const OPENING_TYPES = {
   door: { name: 'Porta', width: 80, height: 210, sill: 0 },
   door2: { name: 'Porta a due ante', width: 120, height: 210, sill: 0 },
-  slide: { name: 'Porta scorrevole', width: 80, height: 210, sill: 0 },
+  slide: { name: 'Scorrevole esterna', width: 80, height: 210, sill: 0 },
+  pocket: { name: 'Scorrevole a scomparsa', width: 80, height: 210, sill: 0 },
   window: { name: 'Finestra', width: 120, height: 140, sill: 90 },
   french: { name: 'Portafinestra', width: 120, height: 230, sill: 0 },
   opening: { name: 'Vano aperto', width: 90, height: 210, sill: 0 },
@@ -267,6 +268,7 @@ export class Plan2D {
     const reach = Math.max(it.d / 2 + this.px(16), it.d / 2 + 12);
     let best = null;
     for (const w of d.walls) {
+      if (w.virtual) continue;
       const c = corners.get(w.id);
       const l = G.toLocal(c, p);
       const L = G.dist(c.A, c.B);
@@ -458,7 +460,11 @@ export class Plan2D {
       if (sx >= b.x0 && sx <= b.x1 && sy >= b.y0 && sy <= b.y1) { this.app.editLength(b); return; }
     }
     const h = this.hit(p);
-    if (h && h.type === 'wall') this.app.editLength({ wall: h.id, kind: 'center' });
+    if (h && h.type === 'wall' && !G.wallById(this.doc, h.id).virtual) this.app.editLength({ wall: h.id, kind: 'center' });
+    if (h && (h.type === 'room' || h.type === 'roomface')) {
+      if (h.type === 'roomface') this.app.selectRoomFace(h.face); else this.app.setSel({ type: 'room', id: h.id });
+      setTimeout(() => { const i = document.getElementById('roomName'); if (i) { i.focus(); i.select(); } }, 30);
+    }
   }
 
   // ---------- selezione e trascinamento ----------
@@ -626,7 +632,7 @@ export class Plan2D {
     if (!dr || G.dist(dr.from, q) < 1) return;
     const t = this.toolOpt.thickness || this.doc.settings.wallThickness;
     const useThick = this.toolOpt.photoThick && thick ? thick : (dr.thick && this.toolOpt.photoThick ? dr.thick : t);
-    G.addWall(this.doc, dr.from, q, { thickness: Math.round(useThick) });
+    G.addWall(this.doc, dr.from, q, this.toolOpt.virtual ? { thickness: 2, virtual: true } : { thickness: Math.round(useThick) });
     this.app.commit('Parete');
     const closed = G.dist(q, dr.start) < 0.5;
     dr.lastDir = G.norm(G.sub(q, dr.from));
@@ -661,6 +667,7 @@ export class Plan2D {
     const d = this.doc, corners = this.corners || G.wallCorners(d);
     let best = null;
     for (const w of d.walls) {
+      if (w.virtual) continue;
       const c = corners.get(w.id);
       const l = G.toLocal(c, p);
       const L = G.dist(c.A, c.B);
@@ -740,6 +747,13 @@ export class Plan2D {
     // pareti
     for (const w of d.walls) {
       const c = this.corners.get(w.id);
+      if (w.virtual) {
+        ctx.strokeStyle = sel && sel.type === 'wall' && sel.id === w.id ? COL.wallSel : '#8a929c';
+        ctx.lineWidth = this.px(2); ctx.setLineDash([this.px(7), this.px(5)]);
+        ctx.beginPath(); ctx.moveTo(c.A.x, c.A.y); ctx.lineTo(c.B.x, c.B.y); ctx.stroke();
+        ctx.setLineDash([]);
+        continue;
+      }
       const poly = G.wallPolygon(c);
       ctx.beginPath(); poly.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.closePath();
       ctx.fillStyle = sel && sel.type === 'wall' && sel.id === w.id ? COL.wallSel : (w.height && w.height < d.settings.wallHeight ? '#7c838d' : COL.wall);
@@ -779,6 +793,19 @@ export class Plan2D {
     if (this.app.photo) this.app.photo.drawOverlay(ctx, this);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this._scaleBar();
+    this._compass();
+  }
+  _compass() {
+    const ctx = this.ctx, a = (this.doc.settings.north || 0) * Math.PI / 180, cx = this.W - 34, cy = 34, r = 20;
+    ctx.save(); ctx.translate(cx, cy);
+    ctx.beginPath(); ctx.arc(0, 0, r + 4, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
+    ctx.strokeStyle = '#c9c5bc'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.rotate(a);
+    ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(6, 2); ctx.lineTo(0, -2); ctx.lineTo(-6, 2); ctx.closePath(); ctx.fillStyle = '#c92a2a'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, r); ctx.lineTo(6, -2); ctx.lineTo(0, 2); ctx.lineTo(-6, -2); ctx.closePath(); ctx.fillStyle = '#9aa0a8'; ctx.fill();
+    ctx.fillStyle = '#c92a2a'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('N', 0, -r - 11 < -r - 2 ? -r + 8 : -r + 8);
+    ctx.restore();
   }
 
   _grid() {
@@ -838,6 +865,7 @@ export class Plan2D {
     const roomSide = new Set();
     for (const r of this.rooms) for (const e of r.edges) roomSide.add(e.wall + e.side);
     for (const w of d.walls) {
+      if (w.virtual) continue;
       const c = this.corners.get(w.id);
       for (const side of ['L', 'R']) {
         const p = side === 'L' ? c.aL : c.aR, q = side === 'L' ? c.bL : c.bR;
@@ -978,11 +1006,24 @@ export class Plan2D {
         const a0 = Math.atan2(tip.y - hp.y, tip.x - hp.x), a1 = Math.atan2(end.y - hp.y, end.x - hp.x);
         ctx.beginPath(); ctx.arc(hp.x, hp.y, lw, a0, a1, crossSign(c, sw, dir)); ctx.stroke();
       }
-    } else if (o.type === 'slide') {
-      const off = sw * (h + this.px(3));
-      const a = W(s0 - o.width * 0.6, off), b = W(s1 - o.width * 0.6, off);
-      ctx.lineWidth = this.px(2.5);
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    } else if (o.type === 'slide' || o.type === 'pocket') {
+      const dir = o.hinge === 'b' ? 1 : -1; // verso cui scorre l'anta
+      const sh = o.width * (o.slide ?? (o.type === 'pocket' ? 0.85 : 0.6)) * dir;
+      if (o.type === 'pocket') {
+        // cassonetto nel muro (tratteggiato) e anta dentro
+        const c0 = dir < 0 ? s0 - o.width : s1, c1 = dir < 0 ? s0 : s1 + o.width;
+        ctx.setLineDash([this.px(4), this.px(3)]); ctx.lineWidth = this.px(0.8);
+        ctx.beginPath(); for (const off of [h * 0.45, -h * 0.45]) { const a = W(c0, off), b = W(c1, off); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); } ctx.stroke();
+        ctx.setLineDash([]);
+        const a = W(s0 + sh, 0), b = W(s1 + sh, 0);
+        ctx.strokeStyle = selected ? COL.sel : '#e8590c'; ctx.lineWidth = this.px(2.5);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      } else {
+        const off = sw * (h + this.px(3));
+        const a = W(s0 + sh, off), b = W(s1 + sh, off);
+        ctx.lineWidth = this.px(2.5);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
       ctx.lineWidth = this.px(1);
     } else if (o.type === 'opening') {
       ctx.setLineDash([this.px(3), this.px(3)]);
@@ -1006,7 +1047,7 @@ export class Plan2D {
     }
     if (this.tool === 'wall') {
       if (dr && hv) {
-        const t = this.toolOpt.photoThick && hv.thick ? hv.thick : (this.toolOpt.thickness || this.doc.settings.wallThickness);
+        const t = this.toolOpt.virtual ? 2 : this.toolOpt.photoThick && hv.thick ? hv.thick : (this.toolOpt.thickness || this.doc.settings.wallThickness);
         const a = dr.from, b = hv.p;
         const v = G.sub(b, a), L = G.len(v);
         if (L > 0.5) {

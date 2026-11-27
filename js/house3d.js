@@ -78,6 +78,7 @@ export function buildHouse(doc, opts = {}) {
 
   // ---- pareti ----
   for (const w of doc.walls) {
+    if (w.virtual) continue; // divisore: solo nella pianta
     const c = corners.get(w.id);
     const wh = w.height || H;
     const hTop = opts.cutHeight ? Math.min(wh, opts.cutHeight) : wh;
@@ -170,7 +171,7 @@ function buildOpening(op, c, w, h) {
   const B = (bw, bh, bd, x, y, z, m) => { const mesh = new THREE.Mesh(new THREE.BoxGeometry(bw * M, bh * M, bd * M), m); mesh.position.set(x * M, (y + bh / 2) * M, z * M); mesh.castShadow = true; mesh.receiveShadow = true; g.add(mesh); return mesh; };
   if (op.type === 'opening') return g;
   const f = 5; // profilo del telaio
-  if (op.type === 'door' || op.type === 'door2' || op.type === 'slide') {
+  if (op.type === 'door' || op.type === 'door2' || op.type === 'slide' || op.type === 'pocket') {
     const fd = t + 2;
     B(f, h, fd, -W / 2 + f / 2, 0, 0, frameMat); B(f, h, fd, W / 2 - f / 2, 0, 0, frameMat); B(W, f, fd, 0, h - f, 0, frameMat);
     const leafMat = solid(op.color || '#efebe3', { rough: 0.45 });
@@ -178,8 +179,15 @@ function buildOpening(op, c, w, h) {
     const side = op.swing === 'R' ? -1 : 1; // verso che lato si apre
     const ang = (op.open ?? 90) * Math.PI / 180;
     const leaves = op.type === 'door2' ? [[-1, lw / 2], [1, lw / 2]] : [[op.hinge === 'b' ? 1 : -1, lw]];
-    if (op.type === 'slide') {
-      B(lw, lh, 3, 0 - lw * 0.75, 0, side * (t / 2 + 3), leafMat); // anta scorrevole esterno muro, quasi aperta
+    if (op.type === 'slide' || op.type === 'pocket') {
+      // scorrevole esterna: anta fuori dal muro; a scomparsa: anta dentro il muro (si vede solo la parte nel vano)
+      const dir = op.hinge === 'b' ? 1 : -1;
+      const sh = lw * (op.slide ?? (op.type === 'pocket' ? 0.85 : 0.6)) * dir;
+      const leaf = B(lw, lh, op.type === 'pocket' ? 3 : 3.5, sh, 0, op.type === 'pocket' ? 0 : side * (t / 2 + 3), leafMat);
+      const kn = new THREE.Mesh(new THREE.BoxGeometry(2 * M, 14 * M, 4 * M), CHROME);
+      kn.position.set((sh - dir * (lw / 2 - 5)) * M, 100 * M, (op.type === 'pocket' ? 0 : side * (t / 2 + 3)) * M);
+      g.add(kn);
+      void leaf;
     } else for (const [hs, w2] of leaves) {
       const pivot = new THREE.Group();
       pivot.position.set(hs * (lw / 2) * M, 0, side * (t / 2 - 2) * M);

@@ -2,7 +2,7 @@
 // centro dell'ingombro a terra, fronte verso +z) e disegnarsi in pianta (coordinate locali in cm, fronte verso +y).
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { solid, GLASS, MIRROR, CHROME, CERAMIC } from './materials.js';
+import { solid, GLASS, MIRROR, CHROME, CERAMIC, finishBase } from './materials.js';
 
 const M = 0.01; // cm -> m
 
@@ -28,7 +28,7 @@ function sphere(g, r, x, y, z, mat, sy = 1) {
 }
 // paralume in tessuto: quando la lampada e' accesa lascia passare un po' di luce (emissivo tenue)
 function glowShade(color) {
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide, emissive: 0xffd9a8, emissiveIntensity: 0 });
+  return new THREE.MeshStandardMaterial({ color: finishBase(color), roughness: 0.85, side: THREE.DoubleSide, emissive: 0xffd9a8, emissiveIntensity: 0 });
 }
 // lampadina: materiale proprio (si accende e si spegne per oggetto), intensita' di base in userData.bulb
 function bulb(g, r, x, y, z, base = 3) {
@@ -46,10 +46,11 @@ function shade(g, rTop, rBot, h, x, y, z, color) {
 const legs4 = (g, w, d, h, inset, s, mat, round = false) => {
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
     const x = sx * (w / 2 - inset), z = sz * (d / 2 - inset);
-    if (round) cyl(g, s / 2, h, x, 0, z, mat, s / 2, 12); else box(g, s, h, s, x, 0, z, mat);
+    const m = round ? cyl(g, s / 2, h, x, 0, z, mat, s / 2, 12) : box(g, s, h, s, x, 0, z, mat);
+    m.userData.leg = true;
   }
 };
-const dark = c => { const k = new THREE.Color(c); k.multiplyScalar(0.6); return '#' + k.getHexString(); };
+const dark = c => { const k = new THREE.Color(finishBase(c)); k.multiplyScalar(0.6); return '#' + k.getHexString(); };
 const WOOD_DARK = '#4a3a2c', METAL = '#2b2b2b';
 
 // ---------- disegno 2D ----------
@@ -64,7 +65,7 @@ const box2d = (ctx, it, fill) => rect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, fil
 export const CATALOG = {
   // Soggiorno
   divano3: {
-    name: 'Divano 3 posti', cat: 'Soggiorno', w: 220, d: 92, h: 82, color: '#8d8a84',
+    name: 'Divano 3 posti', cat: 'Soggiorno', w: 220, d: 92, h: 82, color: '#8d8a84', legH: 4, bases: ['legs', 'floor'],
     build(g, it) {
       const f = solid(it.color, { rough: 0.95 }), a = it.w, d = it.d;
       const arm = Math.min(18, a * 0.1), seats = Math.max(1, Math.round((a - 2 * arm) / 65));
@@ -86,6 +87,7 @@ export const CATALOG = {
     },
   },
   divano2: { like: 'divano3', name: 'Divano 2 posti', w: 160 },
+  mobileBasso: { like: 'mobileTV', name: 'Mobile TV senza televisore', noTv: true },
   poltrona: { like: 'divano3', name: 'Poltrona', w: 90, d: 88, color: '#6b7f8c' },
   tavolino: {
     name: 'Tavolino', cat: 'Soggiorno', w: 110, d: 60, h: 40, color: '#c9a274',
@@ -93,17 +95,19 @@ export const CATALOG = {
     draw(ctx, it) { rrect(ctx, -it.w / 2, -it.d / 2, it.w, it.d, 3, '#fff'); },
   },
   mobileTV: {
-    name: 'Mobile TV', cat: 'Soggiorno', w: 180, d: 45, h: 50, color: '#f2efe9',
+    name: 'Mobile TV', cat: 'Soggiorno', w: 180, d: 45, h: 50, color: '#f2efe9', legH: 10, bases: ['legs', 'floor', 'wall'], wallElev: 35,
     build(g, it) {
       const m = solid(it.color, { rough: 0.6 });
       box(g, it.w, it.h - 10, it.d, 0, 10, 0, m, 1);
       legs4(g, it.w, it.d, 10, 6, 3, solid(METAL));
       for (let i = 1; i < 3; i++) box(g, 0.6, it.h - 16, 0.5, -it.w / 2 + it.w * i / 3, 13, it.d / 2, solid(dark(it.color)));
-      const tvw = Math.min(140, it.w - 20);
-      box(g, tvw, tvw * 0.56, 3, 0, it.h + 8, -it.d / 2 + 12, solid('#111', { rough: 0.2 }));
-      box(g, 24, 8, 16, 0, it.h, -it.d / 2 + 12, solid('#222'));
+      if (it.tv !== false) {
+        const tvw = Math.min(140, it.w - 20);
+        box(g, tvw, tvw * 0.56, 3, 0, it.h + 8, -it.d / 2 + 12, solid('#111', { rough: 0.2 }));
+        box(g, 24, 8, 16, 0, it.h, -it.d / 2 + 12, solid('#222'));
+      }
     },
-    draw(ctx, it) { box2d(ctx, it, '#fff'); const tvw = Math.min(140, it.w - 20); rect(ctx, -tvw / 2, -it.d / 2 + 9, tvw, 4, '#333'); },
+    draw(ctx, it) { box2d(ctx, it, '#fff'); if (it.tv !== false) { const tvw = Math.min(140, it.w - 20); rect(ctx, -tvw / 2, -it.d / 2 + 9, tvw, 4, '#333'); } },
   },
   libreria: {
     name: 'Libreria', cat: 'Soggiorno', w: 100, d: 35, h: 200, color: '#f2efe9',
@@ -206,7 +210,7 @@ export const CATALOG = {
   },
   // Camera
   letto2: {
-    name: 'Letto matrimoniale', cat: 'Camera', w: 170, d: 210, h: 100, color: '#f2efe9', color2: '#8a7a6a',
+    name: 'Letto matrimoniale', cat: 'Camera', w: 170, d: 210, h: 100, color: '#f2efe9', color2: '#8a7a6a', legH: 4, bases: ['legs', 'floor'],
     build(g, it) {
       const fr = solid(it.color2, { rough: 0.8 }), sheet = solid(it.color, { rough: 1 });
       box(g, it.w, 28, it.d, 0, 4, 0, fr, 2);
@@ -226,7 +230,7 @@ export const CATALOG = {
   },
   letto1: { like: 'letto2', name: 'Letto singolo', w: 90 },
   comodino: {
-    name: 'Comodino', cat: 'Camera', w: 45, d: 40, h: 50, color: '#c9a274',
+    name: 'Comodino', cat: 'Camera', w: 45, d: 40, h: 50, color: '#c9a274', legH: 10, bases: ['legs', 'floor', 'wall'], wallElev: 30,
     build(g, it) { const m = solid(it.color, { rough: 0.5 }); box(g, it.w, it.h - 10, it.d, 0, 10, 0, m, 1); legs4(g, it.w, it.d, 10, 3, 3, m); box(g, it.w - 4, 0.6, 0.4, 0, it.h - 18, it.d / 2, solid(dark(it.color))); },
     draw(ctx, it) { box2d(ctx, it, '#fff'); },
   },
@@ -242,7 +246,7 @@ export const CATALOG = {
     draw(ctx, it) { box2d(ctx, it, '#fff'); ctx.beginPath(); ctx.moveTo(-it.w / 2 + 4, 0); ctx.lineTo(it.w / 2 - 4, 0); ctx.stroke(); for (let x = -it.w / 2 + 15; x < it.w / 2 - 5; x += 15) { ctx.beginPath(); ctx.moveTo(x, -6); ctx.lineTo(x - 6, 6); ctx.stroke(); } },
   },
   cassettiera: {
-    name: 'Cassettiera', cat: 'Camera', w: 100, d: 50, h: 80, color: '#f2efe9',
+    name: 'Cassettiera', cat: 'Camera', w: 100, d: 50, h: 80, color: '#f2efe9', legH: 8, bases: ['legs', 'floor', 'wall'], wallElev: 30,
     build(g, it) { const m = solid(it.color, { rough: 0.45 }); box(g, it.w, it.h - 8, it.d, 0, 8, 0, m, 1); legs4(g, it.w, it.d, 8, 4, 3, solid(METAL)); const n = 3; for (let i = 1; i < n; i++) box(g, it.w - 2, 0.5, 0.4, 0, 8 + (it.h - 8) * i / n, it.d / 2, solid(dark(it.color))); },
     draw(ctx, it) { box2d(ctx, it, '#fff'); },
   },
@@ -253,19 +257,39 @@ export const CATALOG = {
   },
   // Bagno
   wc: {
-    name: 'WC', cat: 'Bagno', w: 38, d: 55, h: 40, color: '#f7f7f5',
-    build(g, it) { const m = CERAMIC; box(g, it.w, 35, 16, 0, 0, -it.d / 2 + 8, m, 4); const b = cyl(g, it.w / 2, it.h - 2, 0, 0, 5, m, it.w / 2.4, 32); b.scale.z = (it.d - 16) / it.w; box(g, it.w - 2, 3, it.d - 8, 0, it.h - 2, 3, solid('#ffffff', { rough: 0.3 }), 1.4); },
+    name: 'WC', cat: 'Bagno', w: 38, d: 55, h: 40, color: '#f7f7f5', bases: ['floor', 'hung'],
+    build(g, it) {
+      const m = CERAMIC;
+      if (it.base === 'hung') {
+        // sospeso: cassetta nel muro (si vede la placca), vaso staccato da terra
+        box(g, it.w * 0.75, it.h - 20, 12, 0, 20, -it.d / 2 + 6, m, 4);
+        const b = cyl(g, it.w / 2, it.h - 22, 0, 20, 5, m, it.w / 2.6, 32); b.scale.z = (it.d - 12) / it.w;
+        box(g, 22, 14, 1.2, 0, 92, -it.d / 2 + 0.6, CHROME, 0.5);
+      } else {
+        box(g, it.w, 35, 16, 0, 0, -it.d / 2 + 8, m, 4);
+        const b = cyl(g, it.w / 2, it.h - 2, 0, 0, 5, m, it.w / 2.4, 32); b.scale.z = (it.d - 16) / it.w;
+      }
+      box(g, it.w - 2, 3, it.d - 8, 0, it.h - 2, 3, solid('#ffffff', { rough: 0.3 }), 1.4);
+    },
     draw(ctx, it) { rect(ctx, -it.w / 2, -it.d / 2, it.w, 16, '#fff'); ell(ctx, 0, 5, it.w / 2 - 1, (it.d - 16) / 2 + 1, '#fff'); },
   },
   bidet: {
-    name: 'Bidet', cat: 'Bagno', w: 38, d: 55, h: 40, color: '#f7f7f5',
-    build(g, it) { const b = cyl(g, it.w / 2, it.h, 0, 0, 2, CERAMIC, it.w / 2.4, 32); b.scale.z = (it.d - 4) / it.w; cyl(g, 1.5, 8, 0, it.h, -it.d / 2 + 8, CHROME); },
+    name: 'Bidet', cat: 'Bagno', w: 38, d: 55, h: 40, color: '#f7f7f5', bases: ['floor', 'hung'],
+    build(g, it) {
+      const y0 = it.base === 'hung' ? 20 : 0;
+      if (it.base === 'hung') box(g, it.w * 0.75, it.h - 20, 10, 0, 20, -it.d / 2 + 5, CERAMIC, 4);
+      const b = cyl(g, it.w / 2, it.h - y0, 0, y0, 2, CERAMIC, it.w / 2.4, 32); b.scale.z = (it.d - 4) / it.w;
+      cyl(g, 1.5, 8, 0, it.h, -it.d / 2 + 8, CHROME);
+    },
     draw(ctx, it) { ell(ctx, 0, 2, it.w / 2, it.d / 2 - 2, '#fff'); circ(ctx, 0, -it.d / 2 + 8, 2); },
   },
   lavabo: {
-    name: 'Lavabo con mobile', cat: 'Bagno', w: 80, d: 48, h: 85, color: '#c9a274',
+    name: 'Lavabo con mobile', cat: 'Bagno', w: 80, d: 48, h: 85, color: '#c9a274', bases: ['hungcab', 'floorcab', 'hung'],
     build(g, it) {
-      box(g, it.w, it.h - 30, it.d - 2, 0, 20, -1, solid(it.color, { rough: 0.5 }));
+      const base = it.base || 'hungcab';
+      if (base === 'hungcab') box(g, it.w, it.h - 30, it.d - 2, 0, 20, -1, solid(it.color, { rough: 0.5 }));
+      else if (base === 'floorcab') { box(g, it.w, it.h - 18, it.d - 2, 0, 8, -1, solid(it.color, { rough: 0.5 })); box(g, it.w - 4, 8, it.d - 8, 0, 0, -4, solid('#2b2b2b')); }
+      else { cyl(g, 2, it.h - 40, 0, 30, -it.d / 2 + 10, CHROME); }
       box(g, it.w, 10, it.d, 0, it.h - 10, 0, CERAMIC, 2);
       box(g, it.w - 20, 1, it.d - 18, 0, it.h - 0.5, 3, solid('#e5e5e2', { rough: 0.2 }), 0);
       cyl(g, 1.5, 20, 0, it.h, -it.d / 2 + 6, CHROME); box(g, 3, 3, 12, 0, it.h + 18, -it.d / 2 + 11, CHROME);
@@ -368,7 +392,7 @@ export const CATALOG = {
     draw(ctx, it) { ell(ctx, 0, 0, it.w / 2, it.d / 2, '#fff'); ell(ctx, 0, 0, it.w / 4, it.d / 4); },
   },
   credenza: {
-    name: 'Madia / credenza', cat: 'Soggiorno', w: 160, d: 45, h: 85, color: '#c9a274',
+    name: 'Madia / credenza', cat: 'Soggiorno', w: 160, d: 45, h: 85, color: '#c9a274', legH: 15, bases: ['legs', 'floor', 'wall'], wallElev: 30,
     build(g, it) {
       const m = solid(it.color, { rough: 0.5 });
       box(g, it.w, it.h - 15, it.d, 0, 15, 0, m, 1);
@@ -586,6 +610,8 @@ export function newItem(kind, x, y) {
   const c = CATALOG[kind];
   const it = { id: 'i' + Math.random().toString(36).slice(2, 9), kind, x, y, rot: 0, w: c.w, d: c.d, h: c.h, elev: c.elev ?? 0, color: c.color, color2: c.color2 || null };
   if (c.light) Object.assign(it, { on: true, power: 1, lightColor: '#ffd9a8' });
+  if (c.noTv) it.tv = false;
+  if (c.bases) it.base = c.bases[0];
   return it;
 }
 /** L'oggetto fa luce? (lampade del catalogo o modelli importati segnati come luminosi) */
@@ -598,7 +624,7 @@ export function buildItem(it, wallHeight, modelGeo) {
   if (it.kind === 'modello' && modelGeo) {
     // colori del file oppure una tinta unica scelta dall'utente; se e' una lampada, luminoso
     const vc = modelGeo.hasAttribute('color') && !it.paint;
-    const mat = it.glow ? new THREE.MeshStandardMaterial({ vertexColors: vc, color: vc ? 0xffffff : it.color, roughness: 0.6, emissive: 0xffe2b0, emissiveIntensity: 1 })
+    const mat = it.glow ? new THREE.MeshStandardMaterial({ vertexColors: vc, color: vc ? 0xffffff : finishBase(it.color), roughness: 0.6, emissive: 0xffe2b0, emissiveIntensity: 1 })
       : vc ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }) : solid(it.color, { rough: 0.7 });
     const m = new THREE.Mesh(modelGeo, mat);
     m.scale.set(it.w * M / 2, it.h * M / 2, it.d * M / 2);
@@ -606,6 +632,12 @@ export function buildItem(it, wallHeight, modelGeo) {
     if (it.glow) { m.userData.bulb = 0.8; m.castShadow = false; }
     g.add(m);
   } else c.build(g, it);
+  if (c.legH && (it.base === 'floor' || it.base === 'wall')) {
+    const legs = [];
+    g.traverse(o => { if (o.userData.leg) legs.push(o); });
+    for (const l of legs) l.parent.remove(l);
+    for (const ch of g.children) ch.position.y -= c.legH * M;
+  }
   const elev = c.light === 'ceiling' ? wallHeight - it.h - 40 : c.light === 'flush' ? wallHeight - it.h : (it.elev || 0);
   g.position.set(it.x * M, elev * M, it.y * M);
   g.rotation.y = -it.rot * Math.PI / 180;

@@ -13,21 +13,56 @@ export function initRectLights() { if (!rectLibReady) { RectAreaLightUniformsLib
 // sun: intensita' del sole; env: intensita' del cielo; fill: luce di riempimento della stanza;
 // lamps: lampade accese; exposure: esposizione del render
 export const LIGHT_PRESETS = {
-  auto: { name: 'Automatica', hint: 'Sole e cielo più una luce diffusa nella stanza: interni sempre ben illuminati', day: true, sun: 3.2, sunColor: '#fff0d8', env: 2.2, fill: 1, fillColor: '#fff6ea', lamps: false, exposure: 1.4 },
-  giorno: { name: 'Giorno naturale', hint: 'Solo sole e cielo dalle finestre, come nella realtà', day: true, sun: 3.2, sunColor: '#fff0d8', env: 2.2, fill: 0, fillColor: '#ffffff', lamps: false, exposure: 1.6 },
-  tramonto: { name: 'Tramonto', hint: 'Sole basso e caldo, lampade accese', day: true, sunEl: 7, sun: 3.6, sunColor: '#ffad66', env: 0.8, fill: 0.35, fillColor: '#ffd8b0', lamps: true, exposure: 1.6 },
-  sera: { name: 'Sera', hint: 'Buio fuori, luce solo dalle lampade (più una leggera luce diffusa)', day: false, sun: 0, sunColor: '#ffffff', env: 0.5, fill: 0.2, fillColor: '#ffd9a8', lamps: true, exposure: 1.5 },
-  studio: { name: 'Studio', hint: 'Luce bianca uniforme, senza ombre nette: per vedere bene arredi e colori', day: true, sun: 0, sunColor: '#ffffff', env: 3, fill: 1.6, fillColor: '#ffffff', lamps: false, exposure: 1.3 },
+  auto: { name: 'Automatica', hint: 'Sole all’ora scelta più una luce diffusa nella stanza: interni sempre ben illuminati', sun: 3.2, env: 2.2, fill: 1, fillColor: '#fff6ea', lamps: false, exposure: 1.4 },
+  mattina: { name: 'Mattina', hint: 'Sole basso da est, luce fresca', time: 8.5, sun: 3.2, env: 2.0, fill: 0.5, fillColor: '#fff8f0', lamps: false, exposure: 1.5 },
+  mezzogiorno: { name: 'Mezzogiorno', hint: 'Sole alto da sud, luce piena', time: 13, sun: 3.2, env: 2.2, fill: 0.4, fillColor: '#ffffff', lamps: false, exposure: 1.45 },
+  pomeriggio: { name: 'Pomeriggio', hint: 'Sole da ovest, luce calda e ombre lunghe', time: 16.5, sun: 3.2, env: 2.0, fill: 0.5, fillColor: '#fff4e6', lamps: false, exposure: 1.5 },
+  tramonto: { name: 'Tramonto', hint: 'Sole all’orizzonte, luce arancione, lampade accese', time: 'tramonto', sun: 3.6, env: 0.8, fill: 0.35, fillColor: '#ffd8b0', lamps: true, exposure: 1.6 },
+  sera: { name: 'Sera', hint: 'Buio fuori, luce solo dalle lampade (più una leggera luce diffusa)', night: true, sun: 0, env: 0.5, fill: 0.2, fillColor: '#ffd9a8', lamps: true, exposure: 1.5 },
+  giorno: { name: 'Solo finestre', hint: 'Sole all’ora scelta e cielo, senza aiuti: come nella realtà', sun: 3.2, env: 2.2, fill: 0, fillColor: '#ffffff', lamps: false, exposure: 1.6 },
+  studio: { name: 'Studio', hint: 'Luce bianca uniforme, senza ombre nette: per vedere bene arredi e colori', noSun: true, sun: 0, env: 3, fill: 1.6, fillColor: '#ffffff', lamps: false, exposure: 1.3 },
 };
 
-/** Stato della luce (preset + regolazioni) -> valori da usare. */
+const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+function declination(month) { const n = Math.round((month - 0.5) * 30.4); return 23.44 * Math.sin(2 * Math.PI * (284 + n) / 365); }
+/** Posizione del sole (ora solare, mese 1-12, latitudine): { el, az } in gradi, az da nord in senso orario. */
+export function sunPosition(time, month, lat) {
+  const d = rad(declination(month)), f = rad(lat), H = rad(15 * (time - 12));
+  const el = Math.asin(Math.sin(f) * Math.sin(d) + Math.cos(f) * Math.cos(d) * Math.cos(H));
+  const az = Math.atan2(-Math.cos(d) * Math.sin(H), Math.sin(d) * Math.cos(f) - Math.cos(d) * Math.cos(H) * Math.sin(f));
+  return { el: deg(el), az: (deg(az) + 360) % 360 };
+}
+/** Ora del tramonto (solare) per mese e latitudine. */
+export function sunsetTime(month, lat) {
+  const c = -Math.tan(rad(lat)) * Math.tan(rad(declination(month)));
+  return 12 + deg(Math.acos(Math.max(-1, Math.min(1, c)))) / 15;
+}
+export const fmtTime = t => { const hh = Math.floor(t), mm = Math.round((t - hh) * 60); return hh + ':' + String(mm === 60 ? 0 : mm).padStart(2, '0'); };
+
+/** Stato della luce (preset, ora, mese, nord della casa) -> valori da usare. */
 export function resolveLight(L) {
   const P = LIGHT_PRESETS[L.preset] || LIGHT_PRESETS.auto;
+  const month = L.month || 6, lat = L.lat ?? 45, north = L.north || 0;
+  const time = P.time === 'tramonto' ? sunsetTime(month, lat) - 0.35 : (L.time ?? 11);
+  const sp = sunPosition(time, month, lat);
+  // notte: preset Sera o sole sotto l'orizzonte
+  const day = !P.night && sp.el > -1;
+  const el = Math.max(2, sp.el);
+  // colore e forza del sole secondo l'altezza: arancione all'alba e al tramonto
+  const t = Math.min(1, Math.max(0, (el - 2) / 28));
+  const warm = new THREE.Color('#ff9a50').lerp(new THREE.Color('#fff0d8'), t);
+  const skyK = Math.min(1, 0.35 + Math.sin(rad(el)) * 1.6);
   return {
     ...P,
-    sunAz: L.sunAz ?? 135,
-    sunEl: L.sunElOverride ? L.sunEl : (P.sunEl ?? L.sunEl ?? 40),
-    lampsOn: P.lamps || !!L.lampsDay,
+    day,
+    time, month,
+    sunAz: (sp.az + north) % 360, // in pianta: da "su" in senso orario
+    sunEl: el,
+    sun: day && !P.noSun ? P.sun * (0.75 + 0.25 * t) : 0,
+    sunColor: '#' + warm.getHexString(),
+    warmSky: day && el < 12,
+    env: day ? P.env * (P.noSun ? 1 : skyK) : (P.night ? P.env : 0.45),
+    lampsOn: P.lamps || !!L.lampsDay || !day,
     lampScale: L.lamps ?? 1,
     fill: P.fill * (L.fillScale ?? 1),
     exposure: P.exposure * (L.expScale ?? 1),
@@ -108,7 +143,7 @@ export function addFill(target, doc, camPos, R, k = 1) {
 
 /** Scena completa per il path tracer (uguale per WebGPU e WebGL). */
 export function buildRenderScene(doc, camera, L, models) {
-  const R = resolveLight(L);
+  const R = resolveLight({ ...L, north: doc.settings.north || 0, lat: doc.settings.lat ?? 45 });
   const scene = new THREE.Scene();
   const inside = camera.position.y * 100 < doc.settings.wallHeight;
   const { group, bounds } = buildHouse(doc, { ceilings: inside, models });
@@ -129,7 +164,7 @@ export function buildRenderScene(doc, camera, L, models) {
     scene.add(sun, sun.target);
   }
   addFill(scene, doc, camera.position, R);
-  const sky = skyTexture(R.day, R.sunColor === '#ffad66');
+  const sky = skyTexture(R.day, R.warmSky);
   scene.environment = sky;
   scene.background = sky;
   scene.environmentIntensity = R.env;
