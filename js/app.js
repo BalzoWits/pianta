@@ -22,7 +22,7 @@ const app = {
   sel: null,
   view: '2d',
   setSel, commit, changed, toolDone, onTyped, editLength, selectRoomFace, placeItemAt, previewItem,
-  northStart: () => { $('#hint').textContent = 'Muovi il puntatore verso il nord e clicca sulla mappa per fissarlo · Esc per annullare'; },
+  northStart: () => { $('#hint').textContent = 'Trascina l’ago verso il nord e rilascia, oppure clicca sulla mappa dove sta il nord · Esc per annullare'; },
   northDone: () => { setHint(); renderPanel(); view.setLight({}); },
   askCalibration, modelGeos, snapItem: (it, p) => plan.snapItemToWall(it, p), snapItems: it => plan.snapItemToItems(it, 8), selectRoomAt, selectedRoomCenter, walkStart,
 };

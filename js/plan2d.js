@@ -362,8 +362,8 @@ export class Plan2D {
     if (this.pointers.size > 2) return;
     const p = this.toPlan(sx, sy);
     const cc = this._compassCenter();
-    if (this.northMode) { this._setNorth(sx, sy); this.northMode = null; this.app.commit('Nord'); this.app.northDone && this.app.northDone(); this.redraw(); return; }
-    if (Math.hypot(sx - cc.x, sy - cc.y) < 28) { this.startNorth(); return; }
+    if (this.northMode) { this._setNorth(sx, sy); this._endNorth(); return; }
+    if (Math.hypot(sx - cc.x, sy - cc.y) < 36) { this.startNorth(); this.northMode.press = { sx, sy }; return; }
     if (e.button === 1 || e.button === 2 || this.spaceDown || this.tool === 'pan') {
       this.drag = { type: 'pan', sx, sy, ox: this.view.ox, oy: this.view.oy };
       this.cv.style.cursor = 'grabbing';
@@ -426,6 +426,14 @@ export class Plan2D {
   }
 
   _up(e, cancel) {
+    if (this.northMode && this.northMode.press) {
+      const { sx, sy } = this._pt(e);
+      this.pointers.delete(e.pointerId);
+      // trascinato l'ago: si fissa al rilascio; solo cliccato: si aspetta il clic sulla mappa
+      if (Math.hypot(sx - this.northMode.press.sx, sy - this.northMode.press.sy) > 12) this._endNorth();
+      else this.northMode.press = null;
+      return;
+    }
     const wasPinch = this.pinch;
     this.pointers.delete(e.pointerId);
     if (this.pointers.size < 2) this.pinch = null;
@@ -800,8 +808,9 @@ export class Plan2D {
     this._scaleBar();
     this._compass();
   }
-  _compassCenter() { return { x: this.W - 34, y: 34 }; }
+  _compassCenter() { return { x: this.W - 46, y: 46 }; }
   /** Scelta del nord: l'ago segue il puntatore, un clic lo fissa. Esc annulla. */
+  _endNorth() { this.northMode = null; this.app.commit('Nord'); this.app.northDone && this.app.northDone(); this.redraw(); }
   startNorth() { this.northMode = { old: this.doc.settings.north || 0 }; this.app.northStart && this.app.northStart(); this.redraw(); }
   cancelNorth() { if (!this.northMode) return; this.doc.settings.north = this.northMode.old; this.northMode = null; this.app.northDone && this.app.northDone(); this.redraw(); }
   _setNorth(sx, sy) {
@@ -812,7 +821,7 @@ export class Plan2D {
     this.doc.settings.north = a;
   }
   _compass() {
-    const ctx = this.ctx, a = (this.doc.settings.north || 0) * Math.PI / 180, { x: cx, y: cy } = this._compassCenter(), r = 20;
+    const ctx = this.ctx, a = (this.doc.settings.north || 0) * Math.PI / 180, { x: cx, y: cy } = this._compassCenter();
     const active = !!this.northMode;
     if (active && this.mouse) {
       // linea verso il puntatore
@@ -820,14 +829,22 @@ export class Plan2D {
       ctx.save(); ctx.strokeStyle = '#c92a2a'; ctx.setLineDash([6, 5]); ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(m.x, m.y); ctx.stroke(); ctx.restore();
     }
+    const R = 34; // raggio della rosa
     ctx.save(); ctx.translate(cx, cy);
-    ctx.beginPath(); ctx.arc(0, 0, r + 4, 0, Math.PI * 2); ctx.fillStyle = active ? '#fff1f1' : 'rgba(255,255,255,0.85)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fillStyle = active ? '#fff1f1' : 'rgba(255,255,255,0.92)'; ctx.fill();
     ctx.strokeStyle = active ? '#c92a2a' : '#c9c5bc'; ctx.lineWidth = active ? 2 : 1; ctx.stroke();
+    // tacche ogni 45° e lettere dei punti cardinali (sempre dritte)
+    const P = [['N', 0, '#c92a2a'], ['E', 90, '#2a2e35'], ['S', 180, '#2a2e35'], ['O', 270, '#2a2e35']];
+    ctx.strokeStyle = '#b8b3a9'; ctx.lineWidth = 1;
+    for (let k = 0; k < 8; k++) { const t = a + k * Math.PI / 4, r1 = k % 2 ? R - 5 : R - 8; ctx.beginPath(); ctx.moveTo(Math.sin(t) * r1, -Math.cos(t) * r1); ctx.lineTo(Math.sin(t) * (R - 2), -Math.cos(t) * (R - 2)); ctx.stroke(); }
+    ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const [l, d0, col] of P) { const t = a + d0 * Math.PI / 180; ctx.fillStyle = col; ctx.fillText(l, Math.sin(t) * (R - 15), -Math.cos(t) * (R - 15)); }
+    // ago: rosso verso nord, grigio verso sud
     ctx.rotate(a);
-    ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(6, 2); ctx.lineTo(0, -2); ctx.lineTo(-6, 2); ctx.closePath(); ctx.fillStyle = '#c92a2a'; ctx.fill();
-    ctx.beginPath(); ctx.moveTo(0, r); ctx.lineTo(6, -2); ctx.lineTo(0, 2); ctx.lineTo(-6, -2); ctx.closePath(); ctx.fillStyle = '#9aa0a8'; ctx.fill();
-    ctx.fillStyle = '#c92a2a'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('N', 0, -r - 11 < -r - 2 ? -r + 8 : -r + 8);
+    const n = R - 24;
+    ctx.beginPath(); ctx.moveTo(0, -n); ctx.lineTo(4.5, 0); ctx.lineTo(-4.5, 0); ctx.closePath(); ctx.fillStyle = '#c92a2a'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, n); ctx.lineTo(4.5, 0); ctx.lineTo(-4.5, 0); ctx.closePath(); ctx.fillStyle = '#9aa0a8'; ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
     ctx.restore();
   }
 
