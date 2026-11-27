@@ -109,6 +109,8 @@ export function buildHouse(doc, opts = {}) {
       }
     }
     group.add(wallGroup);
+    // rivestimenti (piastrelle, marmo, immagini) sui due lati
+    for (const side of ['L', 'R']) { const cl = w.clad && w.clad[side]; if (cl && cl.mat) cladding(group, w, c, ops, side, cl, hTop); }
     // serramenti
     for (const o of ops) {
       const op = o.o;
@@ -143,6 +145,51 @@ export function buildHouse(doc, opts = {}) {
   }
   const bounds = new THREE.Box3().setFromObject(group);
   return { group, bounds, rooms };
+}
+
+/** Rivestimento di un lato della parete: lastra di 8 mm sulla faccia, da cl.from a cl.h, con i fori di porte e finestre. */
+function cladding(group, w, c, ops, side, cl, hTop) {
+  const sg = side === 'L' ? 1 : -1;
+  let s0 = G.toLocal(c, side === 'L' ? c.aL : c.aR).s, s1 = G.toLocal(c, side === 'L' ? c.bL : c.bR).s;
+  if (s1 < s0) [s0, s1] = [s1, s0];
+  const z0 = Math.max(0, cl.from || 0), z1 = Math.min(hTop, cl.h || 120);
+  if (z1 - z0 < 1 || s1 - s0 < 1) return;
+  const o0 = sg * c.h, o1 = sg * (c.h + 0.8);
+  const mat = floorMaterial(cl.mat);
+  const parts = [];
+  let s = s0;
+  for (const o of ops) {
+    const a = Math.max(s0, o.s0), b = Math.min(s1, o.s1);
+    if (b <= a) continue;
+    if (a > s) parts.push([s, a, null]);
+    parts.push([a, b, o.o]);
+    s = Math.max(s, b);
+  }
+  if (s < s1) parts.push([s, s1, null]);
+  for (const [a, b, op] of parts) {
+    const spans = op ? [[z0, Math.min(z1, op.sill || 0)], [Math.max(z0, (op.sill || 0) + op.height), z1]] : [[z0, z1]];
+    const poly = [G.toWorld(c, a, o0), G.toWorld(c, b, o0), G.toWorld(c, b, o1), G.toWorld(c, a, o1)];
+    for (const [za, zb] of spans) {
+      if (zb - za < 0.5) continue;
+      const geo = prism(poly, za, zb, () => 0);
+      if (!geo) continue;
+      uvWall(geo, c, mat.userData);
+      const m = new THREE.Mesh(geo, mat);
+      m.receiveShadow = true;
+      m.userData.wall = w.id;
+      group.add(m);
+    }
+  }
+}
+function uvWall(geo, c, ud) {
+  const p = geo.getAttribute('position');
+  const uv = new Float32Array(p.count * 2);
+  const W = ud.texSize || 100, H = ud.texH || W;
+  for (let i = 0; i < p.count; i++) {
+    const s = (p.getX(i) / M - c.A.x) * c.d.x + (p.getZ(i) / M - c.A.y) * c.d.y;
+    uv[i * 2] = s / W; uv[i * 2 + 1] = (p.getY(i) / M) / H;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
 }
 
 function uvPlanar(geo, ud) {

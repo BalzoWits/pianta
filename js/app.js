@@ -573,6 +573,17 @@ function panelWallTool() {
   }
 }
 
+/** Rivestimento: materiale (piastrelle, marmo, immagine), altezza e partenza da terra. */
+function cladEditor(cl, apply, wallH) {
+  const on = !!(cl && cl.mat);
+  panel.append(checkField('Rivestimento', on, v => apply(v ? { mat: (cl && cl.mat) || 'gres', h: (cl && cl.h) || 120, from: (cl && cl.from) || 0 } : null)));
+  if (!on) return;
+  panel.append(numField('Fino all’altezza di', cl.h || 120, v => apply({ ...cl, h: v }), { min: 5, max: 800 }));
+  panel.append(h('div', { class: 'row' }, ...[[60, '60'], [120, '120'], [220, '220'], [wallH, 'Fino al soffitto']].map(([v, n]) => btn(n, () => apply({ ...cl, h: v }), (cl.h || 120) === v ? 'on' : ''))));
+  panel.append(numField('Da terra', cl.from || 0, v => apply({ ...cl, from: v }), { min: 0, max: 400 }));
+  panel.append(floorPicker(cl.mat, k => apply({ ...cl, mat: k })));
+}
+
 function panelDividerTool() {
   panel.append(h('h2', {}, 'Divisore di stanza'));
   panel.append(h('p', {}, 'Una linea tratteggiata che divide un ambiente senza muro: per esempio la zona cucina del soggiorno, un ingresso aperto o la zona notte di un open space. Ogni parte diventa una stanza a sé, con il suo nome, il suo pavimento e la sua superficie. In 3D non si vede.'));
@@ -616,7 +627,7 @@ function panelWall(w) {
   }
   panel.append(h('h2', {}, 'Parete'));
   panel.append(numField('Lunghezza (asse)', L, setVal(v => stretchWall(w, v - L), 'Lunghezza parete'), { min: 5 }));
-  const mode = h('select', {}, h('option', { value: 'stretch' }, 'sposta tutto ciò che c’è oltre'), h('option', { value: 'end' }, 'sposta solo l’estremo'));
+  const mode = h('select', {}, h('option', { value: 'stretch' }, 'sposta tutto ciò che c’è oltre'), h('option', { value: 'end' }, 'sposta solo l’estremo'), h('option', { value: 'scale' }, 'riscala tutta la pianta'));
   mode.value = stretchMode;
   mode.addEventListener('change', () => { stretchMode = mode.value; });
   panel.append(h('label', { class: 'field' }, h('span', {}, 'Allungando'), mode));
@@ -624,7 +635,13 @@ function panelWall(w) {
   panel.append(numField('Altezza', w.height || d.settings.wallHeight, setVal(v => { w.height = v === d.settings.wallHeight ? null : v; }, 'Altezza parete'), { min: 10, max: 800 }));
   panel.append(h('p', {}, 'Un’altezza più bassa del resto fa un muretto (es. 100 cm per un parapetto o una penisola).'));
   const c = G.wallCorners(d).get(w.id);
-  panel.append(h('p', {}, `Lato sinistro ${fmtCm(G.dist(c.aL, c.bL))} cm · lato destro ${fmtCm(G.dist(c.aR, c.bR))} cm`));
+  const rooms = roomsInfo();
+  const sideName = side => { const r = rooms.find(f => f.edges.some(e => e.wall === w.id && e.side === side)); return r ? (r.label && r.label.name ? 'verso ' + r.label.name : 'verso la stanza (' + fmtM2(r.area) + ')') : 'esterno'; };
+  for (const side of ['L', 'R']) {
+    const len = side === 'L' ? G.dist(c.aL, c.bL) : G.dist(c.aR, c.bR);
+    panel.append(h('h3', {}, `Lato ${sideName(side)} · ${fmtCm(len)} cm`));
+    cladEditor(w.clad && w.clad[side], v => { w.clad = { ...(w.clad || {}), [side]: v }; commit('Rivestimento'); }, d.settings.wallHeight);
+  }
   panel.append(h('div', { class: 'row' },
     btn('Dividi a metà', () => { const A = G.nodeById(d, w.a), B = G.nodeById(d, w.b); G.splitWall(d, w, G.mul(G.add(A, B), 0.5)); commit('Dividi parete'); }),
     btn('Rendi divisore', () => { w.virtual = true; w.thickness = 2; d.openings = d.openings.filter(o => o.wall !== w.id); commit('Divisore'); }),
@@ -634,6 +651,7 @@ let stretchMode = 'stretch';
 /** Allunga (o accorcia) una parete di delta cm. In modalita' "stira" sposta tutto cio' che sta oltre l'estremo b. */
 function stretchWall(w, delta, end = 'b') {
   const d = app.doc;
+  if (stretchMode === 'scale') { const L0 = G.wallLength(d, w); scalePlan((L0 + delta) / L0); return; }
   const A = G.nodeById(d, end === 'b' ? w.a : w.b), B = G.nodeById(d, end === 'b' ? w.b : w.a);
   const dir = G.norm(G.sub(B, A));
   if (stretchMode === 'end') { B.x += dir.x * delta; B.y += dir.y * delta; return; }
@@ -866,6 +884,13 @@ function panelRoom(r) {
   }
   panel.append(h('h3', {}, 'Pareti'));
   panel.append(swatches(WALL_COLORS, r.wallColor || '#f4f1ea', setVal(c => { r.wallColor = c; }, 'Colore pareti')));
+  if (info) {
+    panel.append(h('h3', {}, 'Rivestimento di tutte le pareti'));
+    const edges = info.edges.filter(e => { const w2 = G.wallById(app.doc, e.wall); return w2 && !w2.virtual; });
+    const first = edges.map(e => { const w2 = G.wallById(app.doc, e.wall); return w2.clad && w2.clad[e.side]; })[0];
+    cladEditor(first, v => { for (const e of edges) { const w2 = G.wallById(app.doc, e.wall); w2.clad = { ...(w2.clad || {}), [e.side]: v }; } commit('Rivestimento stanza'); }, app.doc.settings.wallHeight);
+    panel.append(h('p', {}, 'Per una sola parete: selezionala e imposta il rivestimento del lato che guarda questa stanza.'));
+  }
   panel.append(h('h3', {}, 'Soffitto'));
   panel.append(swatches(['#f7f5f0', '#ffffff', '#e8e2d6', '#c9d3d8', '#3e4550'], r.ceilColor || '#f7f5f0', setVal(c => { r.ceilColor = c; }, 'Colore soffitto')));
   panel.append(h('div', { class: 'row' },
@@ -1203,8 +1228,30 @@ async function editLength(b) {
   const v = await promptText(label, fmtCm(cur), 'Applica', 'cm, oppure 3,45 m');
   const L = parseLen(v);
   if (!L) return;
-  stretchWall(w, L - cur);
+  const how = await choose('Come applico la misura giusta?', `La parete misura ${fmtCm(cur)} cm, deve misurare ${fmtCm(L)} cm.`, [
+    ['scale', 'Riscala tutta la pianta', 'tutto in proporzione: quando l’intera pianta è un po’ fuori scala (es. foto tarata male)'],
+    ['stretch', 'Allunga solo questa parete', 'sposta ciò che c’è oltre la parete: per correggere una misura singola'],
+  ]);
+  if (!how) return;
+  if (how === 'scale') {
+    const center = G.wallLength(d, w);
+    scalePlan((L + (center - cur)) / center);
+    toast('Pianta riscalata: ora controlla un’altra misura per conferma');
+  } else stretchWall(w, L - cur);
   commit('Misura parete');
+}
+/** Riscala tutta la pianta di f (pareti, stanze, quote, posizione dei mobili e la foto di sfondo; non le misure dei mobili). */
+function scalePlan(f) {
+  const d = app.doc;
+  if (!d.nodes.length || !(f > 0)) return;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const n of d.nodes) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x); y1 = Math.max(y1, n.y); }
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const sc = p => { p.x = cx + (p.x - cx) * f; p.y = cy + (p.y - cy) * f; };
+  d.nodes.forEach(sc); d.items.forEach(sc); d.rooms.forEach(sc);
+  for (const dm of d.dims) { sc(dm.a); sc(dm.b); }
+  for (const o of d.openings) o.pos *= f;
+  if (d.background) { d.background.k *= f; const p = { x: d.background.cx, y: d.background.cy }; sc(p); d.background.cx = p.x; d.background.cy = p.y; }
 }
 function onTyped(s) {
   const t = $('#typed');
