@@ -1,8 +1,8 @@
 // Editor della pianta in 2D su canvas: disegno delle pareti con agganci e quote, porte e finestre,
 // mobili, stanze, quote libere e foto di sfondo. Funziona con mouse, tastiera e touch (iPad).
-import * as G from './geom.js?v=mwytbqcp';
-import { CATALOG } from './furniture.js?v=mwytbqcp';
-import { FLOORS, floorTint } from './materials.js?v=mwytbqcp';
+import * as G from './geom.js?v=mwyu6iif';
+import { CATALOG } from './furniture.js?v=mwyu6iif';
+import { FLOORS, floorTint } from './materials.js?v=mwyu6iif';
 
 const COL = {
   bg: '#f6f5f2', grid: '#e6e3dc', grid2: '#d6d2c9', wall: '#2f343b', wallSel: '#2f7bf6', node: '#2f7bf6',
@@ -87,6 +87,26 @@ export class Plan2D {
     this.view.ox = this.W / 2 - (x0 + x1) / 2 * this.view.s;
     this.view.oy = this.H / 2 - (y0 + y1) / 2 * this.view.s;
     this.redraw();
+  }
+  /** Immagine PNG di tutta la pianta (lato lungo maxPx), senza selezioni ne' puntatore. */
+  exportImage(maxPx = 2400) {
+    const d = this.doc, pts = [...d.nodes, ...d.items.map(i => ({ x: i.x, y: i.y }))];
+    if (!pts.length) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    const ar = Math.max(0.3, Math.min(3, (x1 - x0 + 200) / (y1 - y0 + 200)));
+    const w = ar >= 1 ? maxPx : Math.round(maxPx * ar), h = ar >= 1 ? Math.round(maxPx / ar) : maxPx;
+    const keep = { view: { ...this.view }, sel: this.app.sel, hov: this.hoverHit, hv: this.hover, tool: this.tool };
+    this.app.sel = null; this.hoverHit = null; this.hover = null; this.tool = 'none';
+    this.W = w; this.H = h; this.dpr = 1; this.cv.width = w; this.cv.height = h;
+    this.fit();
+    this.draw();
+    const url = this.cv.toDataURL('image/png');
+    this.app.sel = keep.sel; this.hoverHit = keep.hov; this.hover = keep.hv; this.tool = keep.tool;
+    this.resize();
+    this.view = keep.view;
+    this.redraw();
+    return url;
   }
   zoomAt(x, y, f) {
     const s2 = Math.max(0.02, Math.min(20, this.view.s * f));

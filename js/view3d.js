@@ -3,9 +3,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { buildHouse } from './house3d.js?v=mwytbqcp';
-import { GLASS } from './materials.js?v=mwytbqcp';
-import { resolveLight, applyLamps, addFill, buildRenderScene, initRectLights } from './lighting.js?v=mwytbqcp';
+import { buildHouse } from './house3d.js?v=mwyu6iif';
+import { GLASS } from './materials.js?v=mwyu6iif';
+import { resolveLight, applyLamps, addFill, buildRenderScene, initRectLights } from './lighting.js?v=mwyu6iif';
 
 const M = 0.01;
 
@@ -358,7 +358,7 @@ export class View3D {
     this.tracing = true;
     if (this.gpuOk === undefined) {
       try {
-        const { webgpuAvailable } = await import('./render-gpu.js?v=mwytbqcp');
+        const { webgpuAvailable } = await import('./render-gpu.js?v=mwyu6iif');
         const r = await webgpuAvailable();
         this.gpuOk = r.ok; this.gpuWhy = r.why || '';
       } catch (e) { this.gpuOk = false; this.gpuWhy = 'il motore WebGPU non si è caricato (' + e.message + ')'; }
@@ -367,7 +367,7 @@ export class View3D {
       try {
         // un solo avvio del motore anche se il render parte due volte di fila (opzioni cambiate subito)
         if (!this.gpuReady) this.gpuReady = (async () => {
-          const { GpuTracer } = await import('./render-gpu.js?v=mwytbqcp');
+          const { GpuTracer } = await import('./render-gpu.js?v=mwyu6iif');
           const g = new GpuTracer(this.host, this);
           await g.init();
           this.gpu = g;

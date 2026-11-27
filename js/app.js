@@ -1,17 +1,18 @@
 // Pianta: collega editor 2D, vista 3D, render, pannelli, progetti e salvataggio.
-import * as G from './geom.js?v=mwytbqcp';
-import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js?v=mwytbqcp';
-import { View3D } from './view3d.js?v=mwytbqcp';
-import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js?v=mwytbqcp';
-import { LIGHT_PRESETS, resolveLight, fmtTime } from './lighting.js?v=mwytbqcp';
-import { itemThumb } from './thumbs.js?v=mwytbqcp';
-import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS, FINISHES, finishCss } from './materials.js?v=mwytbqcp';
-import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js?v=mwytbqcp';
-import { skewAngle, rotateImage, detectWalls } from './detect.js?v=mwytbqcp';
-import * as MD from './models.js?v=mwytbqcp';
-import * as store from './store.js?v=mwytbqcp';
-import { Sync } from './cloud.js?v=mwytbqcp';
-import { sampleDoc, addOpeningAt } from './sample.js?v=mwytbqcp';
+import * as G from './geom.js?v=mwyu6iif';
+import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js?v=mwyu6iif';
+import { View3D } from './view3d.js?v=mwyu6iif';
+import { buildHouse } from './house3d.js?v=mwyu6iif';
+import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js?v=mwyu6iif';
+import { LIGHT_PRESETS, resolveLight, fmtTime } from './lighting.js?v=mwyu6iif';
+import { itemThumb } from './thumbs.js?v=mwyu6iif';
+import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS, FINISHES, finishCss } from './materials.js?v=mwyu6iif';
+import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js?v=mwyu6iif';
+import { skewAngle, rotateImage, detectWalls } from './detect.js?v=mwyu6iif';
+import * as MD from './models.js?v=mwyu6iif';
+import * as store from './store.js?v=mwyu6iif';
+import { Sync } from './cloud.js?v=mwyu6iif';
+import { sampleDoc, addOpeningAt } from './sample.js?v=mwyu6iif';
 
 const $ = s => document.querySelector(s);
 const QP = new URLSearchParams(location.search);
@@ -1405,18 +1406,78 @@ async function removeProject(id) {
     if (list.length) await openProject(list[0].id); else await newProject(G.emptyDoc(), 'Nuova casa');
   }
 }
-function exportProject() {
-  const blob = new Blob([JSON.stringify(packDoc())], { type: 'application/json' });
+/** Salva un file: sul telefono e sull'iPad con il foglio di condivisione, sul computer nei Download. */
+async function saveBlob(blob, name) {
+  const touch = window.matchMedia('(pointer: coarse)').matches;
+  if (touch && navigator.canShare) {
+    try {
+      const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
+      if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (project ? project.name : 'pianta') + '.pianta.json';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  if (!touch) toast('Salvato nella cartella Download: ' + name);
 }
+const fileBase = () => (project ? project.name : 'pianta').replace(/[\\/:*?"<>|]/g, '-');
+function exportProject() {
+  saveBlob(new Blob([JSON.stringify(packDoc())], { type: 'application/json' }), fileBase() + '.pianta.json');
+}
+function exportPlanImage() {
+  const url = plan.exportImage(2600);
+  if (!url) { toast('La pianta è vuota'); return; }
+  fetch(url).then(r => r.blob()).then(b => saveBlob(b, fileBase() + ' - pianta.png'));
+}
+async function exportGLB() {
+  try {
+    busy('Preparo il modello 3D…');
+    const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+    const { group } = buildHouse(app.doc, { ceilings: false, models: modelGeos() });
+    group.traverse(o => { if (o.isLight) o.visible = false; });
+    const buf = await new GLTFExporter().parseAsync(group, { binary: true, onlyVisible: true });
+    await saveBlob(new Blob([buf], { type: 'model/gltf-binary' }), fileBase() + '.glb');
+  } catch (e) { console.error(e); toast('Esportazione non riuscita: ' + e.message); } finally { busy(null); }
+}
+function openFileMenu() {
+  modal(`<h2>File</h2>
+    <div class="conflict filemenu">
+      <button class="btn" data-f="export"><b>Esporta il progetto</b><small>file .pianta.json con tutto (foto, pavimenti, modelli 3D): per tenerne una copia o aprirlo su un altro dispositivo</small></button>
+      <button class="btn" data-f="import"><b>Importa un progetto</b><small>apre un file .pianta.json come nuovo progetto (quello attuale resta)</small></button>
+      <button class="btn" data-f="png"><b>Pianta come immagine</b><small>PNG ad alta risoluzione con quote, stanze e arredi</small></button>
+      <button class="btn" data-f="glb"><b>Modello 3D (GLB)</b><small>casa e arredi con i materiali: si apre in Blender, SketchUp, nei visualizzatori 3D di Windows e Mac</small></button>
+    </div>
+    <p class="note">Puoi anche trascinare un file sulla finestra: un progetto (.json), la foto di una planimetria o un modello 3D (OBJ, STL, GLB).</p>
+    <footer><button class="btn" data-close>Chiudi</button></footer>`, (el, close) => {
+    el.addEventListener('click', e => {
+      const b = e.target.closest('[data-f]');
+      if (!b) return;
+      close();
+      ({ export: exportProject, import: () => $('#fileProject').click(), png: exportPlanImage, glb: exportGLB })[b.dataset.f]();
+    });
+  });
+}
+$('#btnFile').addEventListener('click', openFileMenu);
+// trascinare un file sulla finestra
+window.addEventListener('dragover', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault(); });
+window.addEventListener('drop', e => {
+  const f = e.dataTransfer && e.dataTransfer.files[0];
+  if (!f) return;
+  e.preventDefault();
+  const n = f.name.toLowerCase();
+  const target = /\.json$/.test(n) ? '#fileProject' : /\.(obj|stl|glb|gltf)$/.test(n) ? '#fileModel' : /^image\//.test(f.type) ? '#fileImg' : null;
+  if (!target) { toast('Formato non riconosciuto: ' + f.name); return; }
+  if (target === '#fileImg' && app.view !== '2d') setView('2d');
+  if (target === '#fileImg') pickTool('photo');
+  const dt = new DataTransfer(); dt.items.add(f);
+  const inp = $(target); inp.files = dt.files; inp.dispatchEvent(new Event('change'));
+});
 $('#fileProject').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  try { const doc = JSON.parse(await f.text()); if (!doc.walls) throw new Error('Non è un progetto di Pianta'); await newProject(doc, doc.name || f.name.replace(/\.pianta\.json$|\.json$/, '')); }
+  try { const doc = JSON.parse(await f.text()); if (!doc.walls) throw new Error('Non è un progetto di Pianta'); await newProject(doc, doc.name || f.name.replace(/\.pianta\.json$|\.json$/, '')); toast('Progetto «' + project.name + '» importato'); }
   catch (err) { toast('Import non riuscito: ' + err.message); }
 });
 $('#btnProjects').addEventListener('click', openProjects);

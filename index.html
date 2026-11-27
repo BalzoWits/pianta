@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f6f5f2">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f343b'/%3E%3Cpath d='M7 7h18v18H7zM16 7v9h9M7 18h6' fill='none' stroke='%23f6f5f2' stroke-width='2.4'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css?v=mwytbqcp">
+<link rel="stylesheet" href="style.css?v=mwyu6iif">
 <script type="importmap">
 { "imports": {
   "three": "./lib/three.module.js",
@@ -31,6 +31,9 @@
   </div>
   <button type="button" class="btn ghost" id="btnProjects" title="Tutti i progetti">
     <svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></svg><span class="lbl">Progetti</span>
+  </button>
+  <button type="button" class="btn ghost" id="btnFile" title="Importa ed esporta: progetto, immagine della pianta, modello 3D">
+    <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 17v3h16v-3"/></svg><span class="lbl">File</span>
   </button>
   <button type="button" class="projname" id="projName" title="Rinomina il progetto">…</button>
   <span class="grow"></span>
@@ -71,7 +74,7 @@
 <div id="busy" class="busy" hidden><div class="busy-box"><div class="spin"></div><div id="busyMsg">Attendi…</div></div></div>
 <input type="file" id="fileImg" accept="image/*" hidden>
 <input type="file" id="fileModel" accept=".obj,.stl,.glb,.gltf" hidden>
-<input type="file" id="fileProject" accept=".json,application/json" hidden>
-<script type="module" src="js/app.js?v=mwytbqcp"></script>
+<input type="file" id="fileProject" hidden>
+<script type="module" src="js/app.js?v=mwyu6iif"></script>
 </body>
 </html>

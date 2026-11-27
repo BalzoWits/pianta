@@ -1,6 +1,6 @@
 // Miniature 3D degli arredi per il catalogo: ogni mobile reso una volta in vista tre quarti, poi in cache.
 import * as THREE from 'three';
-import { buildItem, newItem } from './furniture.js?v=mwytbqcp';
+import { buildItem, newItem } from './furniture.js?v=mwyu6iif';
 
 let R = null, scene, cam;
 const cache = new Map();
