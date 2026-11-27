@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { WebGPUPathTracer, OIDNDenoiser } from 'pathtracer-webgpu';
-import { buildRenderScene } from './lighting.js?v=mwyu6iif';
+import { buildRenderScene } from './lighting.js?v=mwz0jl1g';
 
 const M = 0.01;
 
@@ -52,7 +52,9 @@ export class GpuTracer {
     if (on && !this.denoiser) {
       try {
         const { initUNetFromURL } = await import('../lib/oidn-webgpu.js');
-        this.denoiser = new OIDNDenoiser({ initUNetFromURL, auxWeightsUrl: new URL('../lib/oidn/rt_hdr_alb_nrm_small.tza', import.meta.url).href });
+        // su telefono e iPad la memoria e' poca: il filtro lavora a pezzi piccoli
+        const mobile = window.matchMedia('(pointer: coarse)').matches;
+        this.denoiser = new OIDNDenoiser({ initUNetFromURL, auxWeightsUrl: new URL('../lib/oidn/rt_hdr_alb_nrm_small.tza', import.meta.url).href, ...(mobile ? { maxTileSize: 256 } : {}) });
         this.denoiser.addEventListener('error', e => console.warn('denoiser', e));
       } catch (e) { console.warn('Denoiser non disponibile', e); this.denoiser = null; return; }
     }

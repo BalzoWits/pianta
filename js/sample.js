@@ -1,7 +1,7 @@
 // Appartamento di esempio (circa 80 m²): soggiorno con cucina, camera, studio, bagno e disimpegno, arredati.
-import * as G from './geom.js?v=mwyu6iif';
-import { newItem } from './furniture.js?v=mwyu6iif';
-import { OPENING_TYPES } from './plan2d.js?v=mwyu6iif';
+import * as G from './geom.js?v=mwz0jl1g';
+import { newItem } from './furniture.js?v=mwz0jl1g';
+import { OPENING_TYPES } from './plan2d.js?v=mwz0jl1g';
 
 /** Apertura nel punto p (sulla linea d'asse di una parete). */
 export function addOpeningAt(doc, p, type, extra = {}) {

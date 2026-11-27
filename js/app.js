@@ -1,18 +1,18 @@
 // Pianta: collega editor 2D, vista 3D, render, pannelli, progetti e salvataggio.
-import * as G from './geom.js?v=mwyu6iif';
-import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js?v=mwyu6iif';
-import { View3D } from './view3d.js?v=mwyu6iif';
-import { buildHouse } from './house3d.js?v=mwyu6iif';
-import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js?v=mwyu6iif';
-import { LIGHT_PRESETS, resolveLight, fmtTime } from './lighting.js?v=mwyu6iif';
-import { itemThumb } from './thumbs.js?v=mwyu6iif';
-import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS, FINISHES, finishCss } from './materials.js?v=mwyu6iif';
-import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js?v=mwyu6iif';
-import { skewAngle, rotateImage, detectWalls } from './detect.js?v=mwyu6iif';
-import * as MD from './models.js?v=mwyu6iif';
-import * as store from './store.js?v=mwyu6iif';
-import { Sync } from './cloud.js?v=mwyu6iif';
-import { sampleDoc, addOpeningAt } from './sample.js?v=mwyu6iif';
+import * as G from './geom.js?v=mwz0jl1g';
+import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js?v=mwz0jl1g';
+import { View3D } from './view3d.js?v=mwz0jl1g';
+import { buildHouse } from './house3d.js?v=mwz0jl1g';
+import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js?v=mwz0jl1g';
+import { LIGHT_PRESETS, resolveLight, fmtTime } from './lighting.js?v=mwz0jl1g';
+import { itemThumb } from './thumbs.js?v=mwz0jl1g';
+import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS, FINISHES, finishCss } from './materials.js?v=mwz0jl1g';
+import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js?v=mwz0jl1g';
+import { skewAngle, rotateImage, detectWalls } from './detect.js?v=mwz0jl1g';
+import * as MD from './models.js?v=mwz0jl1g';
+import * as store from './store.js?v=mwz0jl1g';
+import { Sync } from './cloud.js?v=mwz0jl1g';
+import { sampleDoc, addOpeningAt } from './sample.js?v=mwz0jl1g';
 
 const $ = s => document.querySelector(s);
 const QP = new URLSearchParams(location.search);
@@ -258,6 +258,7 @@ function setView(v) {
   $('#v3d').hidden = v === '2d';
   plan.visible = v === '2d';
   panelMode = null;
+  if (prev === 'render' && v !== 'render') renderStopped();
   if (v === '2d') { view.setVisible(false); plan.resize(); }
   else {
     view.setVisible(true);
@@ -268,10 +269,28 @@ function setView(v) {
   updateWalkpad();
   renderTools(); renderPanel(); setHint();
 }
-const renderOpts = { style: 'pt', bounces: 6, scale: 1, samples: 96, denoise: true };
+// filtro del rumore spento su questo dispositivo se in passato il sistema ha chiuso la pagina durante il filtro
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* pieno o vietato */ } };
+const renderOpts = { style: 'pt', bounces: 6, scale: 1, samples: 96, denoise: lsGet('pianta.noDenoise') !== '1' };
 function updateWalkpad() { $('#walkpad').hidden = !(app.view !== '2d' && view.mode === 'walk'); }
 document.querySelectorAll('#viewSeg button').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+// stato del render in corso, ricordato nel browser: se il sistema chiude la pagina (memoria) alla
+// riapertura si sa in che fase era e si recupera l'immagine salvata prima del filtro
+let lastStage = null;
+function trackRender(st) {
+  if (st.stage === lastStage) return;
+  lastStage = st.stage;
+  if (st.stage === 'rendering' || st.stage === 'denoising') lsSet('pianta.renderRun', JSON.stringify({ stage: st.stage, t: Date.now() }));
+  if (st.stage === 'denoising') {
+    // immagine gia' calcolata, prima del filtro: se il filtro fa chiudere la pagina non si perde
+    try { const c = document.createElement('canvas'); const img = new Image(); img.onload = () => { c.width = img.width; c.height = img.height; c.getContext('2d').drawImage(img, 0, 0); lsSet('pianta.renderShot', c.toDataURL('image/jpeg', 0.9)); }; img.src = view.snapshot(); } catch (e) { /* niente */ }
+  }
+  if (st.stage === 'done' || st.stage === 'instant') { lsSet('pianta.renderRun', null); lsSet('pianta.renderShot', null); }
+}
+function renderStopped() { lastStage = null; lsSet('pianta.renderRun', null); }
 view.onProgress = st => {
+  trackRender(st);
   const n = st.samples || 0;
   let t;
   if (st.stage === 'instant') t = 'Pronto';
@@ -965,7 +984,7 @@ function panelRender() {
     rs.value = String(R.scale);
     rs.addEventListener('change', () => { R.scale = +rs.value; restart(); });
     panel.append(h('label', { class: 'field' }, h('span', {}, 'Risoluzione'), rs));
-    if (view.gpuOk !== false) panel.append(checkField('Togli il rumore alla fine', R.denoise, v => { R.denoise = v; restart(); }));
+    if (view.gpuOk !== false) panel.append(checkField('Togli il rumore alla fine', R.denoise, v => { R.denoise = v; lsSet('pianta.noDenoise', v ? null : '1'); restart(); }));
     panel.append(h('p', {}, 'Più veloce: meno passaggi, meno rimbalzi (2–3 bastano per una bozza), risoluzione più bassa. «Passaggi» a 0 = continua finché non cambi vista.'));
     panel.append(h('p', { class: 'engine' }, view.useGpu ? 'Motore: WebGPU (veloce).' : view.gpuOk === false ? 'Motore: WebGL compatibile, più lento — ' + (view.gpuWhy || 'WebGPU non disponibile') + '.' : ''));
   }
@@ -1602,8 +1621,31 @@ function busy(msg) { $('#busy').hidden = !msg; if (msg) $('#busyMsg').textConten
 // ---------- avvio ----------
 function onResize() { if (app.view === '2d') plan.resize(); else view.resize(); }
 new ResizeObserver(onResize).observe($('#stage'));
-window.addEventListener('beforeunload', () => { persistProject(); });
+window.addEventListener('beforeunload', () => { persistProject(); renderStopped(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) persistProject(); });
+
+/** La pagina e' stata chiusa dal sistema durante un render (iPhone/iPad con poca memoria)? */
+function checkRenderCrash() {
+  let run = null;
+  try { run = JSON.parse(lsGet('pianta.renderRun') || 'null'); } catch (e) { run = null; }
+  if (!run || Date.now() - run.t > 6 * 3600e3) { lsSet('pianta.renderRun', null); return; }
+  lsSet('pianta.renderRun', null);
+  const shot = lsGet('pianta.renderShot');
+  let msg;
+  if (run.stage === 'denoising') {
+    lsSet('pianta.noDenoise', '1'); renderOpts.denoise = false;
+    msg = 'Il telefono ha chiuso la pagina mentre toglievo il rumore (memoria finita). Da ora su questo dispositivo il filtro è spento: puoi riattivarlo nel pannello del render.' + (shot ? ' L’immagine era già calcolata: eccola, senza il filtro.' : '');
+  } else {
+    renderOpts.scale = Math.min(renderOpts.scale, 0.75);
+    msg = 'Il telefono ha chiuso la pagina durante il render (memoria finita). La prossima volta prova la risoluzione al 75% o la qualità «Buona».';
+  }
+  modal(`<h2>Il render si è interrotto</h2><p class="note">${esc(msg)}</p>${shot ? `<img src="${shot}" alt="" style="width:100%;border-radius:8px">` : ''}
+    <footer>${shot ? '<button class="primary" data-save>Salva immagine</button>' : ''}<button class="btn" data-close>Chiudi</button></footer>`, (el, close) => {
+    const b = el.querySelector('[data-save]');
+    if (b) b.addEventListener('click', async () => { const blob = await (await fetch(shot)).blob(); await saveBlob(blob, fileBase() + ' - render.jpg'); });
+  });
+  lsSet('pianta.renderShot', null);
+}
 
 (async function start() {
   plan.resize();
@@ -1623,6 +1665,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) persi
     toast('Archivio del browser non disponibile: i progetti non verranno salvati');
   }
   sync.start();
+  checkRenderCrash();
   const v = QP.get('vista');
   if (v === '3d' || v === 'render') setView(v);
   if (QP.get('cammina') !== null) { view.setMode('walk'); updateWalkpad(); renderTools(); }

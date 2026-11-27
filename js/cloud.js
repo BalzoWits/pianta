@@ -5,7 +5,7 @@
 //                    users/<uid>/pianta/data/<progetto> = { rev, json }
 // "rev" cresce a ogni salvataggio: ogni copia locale ricorda su quale rev si basa, cosi' si capisce
 // se nel frattempo un altro dispositivo ha salvato una versione piu' nuova (conflitto).
-import { firebaseConfig } from './firebase-config.js?v=mwyu6iif';
+import { firebaseConfig } from './firebase-config.js?v=mwz0jl1g';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
 const MAX_BYTES = 15e6;

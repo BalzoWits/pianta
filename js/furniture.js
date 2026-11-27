@@ -2,7 +2,7 @@
 // centro dell'ingombro a terra, fronte verso +z) e disegnarsi in pianta (coordinate locali in cm, fronte verso +y).
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { solid, GLASS, MIRROR, CHROME, CERAMIC, finishBase } from './materials.js?v=mwyu6iif';
+import { solid, GLASS, MIRROR, CHROME, CERAMIC, finishBase } from './materials.js?v=mwz0jl1g';
 
 const M = 0.01; // cm -> m
 
