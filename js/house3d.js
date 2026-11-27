@@ -1,9 +1,9 @@
 // Costruisce la casa in 3D dal documento: pareti (con i fori di porte e finestre), pavimenti, soffitti,
 // serramenti e mobili. Pianta in cm (x, y) -> three.js in metri (x, z), y verso l'alto.
 import * as THREE from 'three';
-import * as G from './geom.js';
-import { solid, floorMaterial, GLASS, CHROME } from './materials.js';
-import { buildItem } from './furniture.js';
+import * as G from './geom.js?v=mwytbqcp';
+import { solid, floorMaterial, GLASS, CHROME } from './materials.js?v=mwytbqcp';
+import { buildItem } from './furniture.js?v=mwytbqcp';
 
 const M = 0.01;
 
@@ -111,6 +111,10 @@ export function buildHouse(doc, opts = {}) {
     group.add(wallGroup);
     // rivestimenti (piastrelle, marmo, immagini) sui due lati
     for (const side of ['L', 'R']) { const cl = w.clad && w.clad[side]; if (cl && cl.mat) cladding(group, w, c, ops, side, cl, hTop); }
+    // parete che finisce libera (es. il muretto della doccia): il rivestimento gira anche sulla testa
+    if (w.clad && ((w.clad.L && w.clad.L.mat) || (w.clad.R && w.clad.R.mat))) {
+      for (const [end, nid] of [['a', w.a], ['b', w.b]]) if (G.degree(doc, nid) === 1) endCap(group, w, c, end, hTop);
+    }
     // serramenti
     for (const o of ops) {
       const op = o.o;
@@ -181,12 +185,32 @@ function cladding(group, w, c, ops, side, cl, hTop) {
     }
   }
 }
-function uvWall(geo, c, ud) {
+/** Rivestimento della testa di una parete libera: lastra davanti alla faccia corta, larga quanto il muro piu' i due rivestimenti. */
+function endCap(group, w, c, end, hTop) {
+  const cl = (w.clad.L && w.clad.L.mat) ? w.clad.L : w.clad.R;
+  const other = cl === w.clad.L ? w.clad.R : w.clad.L;
+  const z0 = Math.max(0, Math.min(cl.from || 0, other && other.mat ? other.from || 0 : Infinity));
+  const z1 = Math.min(hTop, Math.max(cl.h || 120, other && other.mat ? other.h || 0 : 0));
+  if (z1 - z0 < 1) return;
+  const L = G.dist(c.A, c.B);
+  const sA = end === 'a' ? -0.8 : L, sB = end === 'a' ? 0 : L + 0.8;
+  const oL = w.clad.L && w.clad.L.mat ? c.h + 0.8 : c.h, oR = w.clad.R && w.clad.R.mat ? -(c.h + 0.8) : -c.h;
+  const poly = [G.toWorld(c, sA, oR), G.toWorld(c, sB, oR), G.toWorld(c, sB, oL), G.toWorld(c, sA, oL)];
+  const mat = floorMaterial(cl.mat);
+  const geo = prism(poly, z0, z1, () => 0);
+  if (!geo) return;
+  uvWall(geo, c, mat.userData, true);
+  const m = new THREE.Mesh(geo, mat);
+  m.receiveShadow = true; m.userData.wall = w.id;
+  group.add(m);
+}
+function uvWall(geo, c, ud, across = false) {
   const p = geo.getAttribute('position');
   const uv = new Float32Array(p.count * 2);
   const W = ud.texSize || 100, H = ud.texH || W;
+  const ax = across ? c.n : c.d;
   for (let i = 0; i < p.count; i++) {
-    const s = (p.getX(i) / M - c.A.x) * c.d.x + (p.getZ(i) / M - c.A.y) * c.d.y;
+    const s = (p.getX(i) / M - c.A.x) * ax.x + (p.getZ(i) / M - c.A.y) * ax.y;
     uv[i * 2] = s / W; uv[i * 2 + 1] = (p.getY(i) / M) / H;
   }
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));

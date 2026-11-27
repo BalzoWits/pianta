@@ -1,17 +1,17 @@
 // Pianta: collega editor 2D, vista 3D, render, pannelli, progetti e salvataggio.
-import * as G from './geom.js';
-import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js';
-import { View3D } from './view3d.js';
-import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js';
-import { LIGHT_PRESETS, resolveLight, fmtTime } from './lighting.js';
-import { itemThumb } from './thumbs.js';
-import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS, FINISHES, finishCss } from './materials.js';
-import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js';
-import { skewAngle, rotateImage, detectWalls } from './detect.js';
-import * as MD from './models.js';
-import * as store from './store.js';
-import { Sync } from './cloud.js';
-import { sampleDoc, addOpeningAt } from './sample.js';
+import * as G from './geom.js?v=mwytbqcp';
+import { Plan2D, OPENING_TYPES, fmtCm, fmtM2, isTyping } from './plan2d.js?v=mwytbqcp';
+import { View3D } from './view3d.js?v=mwytbqcp';
+import { CATALOG, CATEGORIES, newItem, isLamp } from './furniture.js?v=mwytbqcp';
+import { LIGHT_PRESETS, resolveLight, fmtTime } from './lighting.js?v=mwytbqcp';
+import { itemThumb } from './thumbs.js?v=mwytbqcp';
+import { FLOORS, WALL_COLORS, ITEM_COLORS, floorThumb, setCustomFloors, onTextureLoaded, isCustomFloor, LAYOUTS, FINISHES, finishCss } from './materials.js?v=mwytbqcp';
+import { PhotoTool, fileToDataURL, warpPerspective, ocrScale, darkMap, loadImage } from './photo.js?v=mwytbqcp';
+import { skewAngle, rotateImage, detectWalls } from './detect.js?v=mwytbqcp';
+import * as MD from './models.js?v=mwytbqcp';
+import * as store from './store.js?v=mwytbqcp';
+import { Sync } from './cloud.js?v=mwytbqcp';
+import { sampleDoc, addOpeningAt } from './sample.js?v=mwytbqcp';
 
 const $ = s => document.querySelector(s);
 const QP = new URLSearchParams(location.search);

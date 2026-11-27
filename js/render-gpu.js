@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { WebGPUPathTracer, OIDNDenoiser } from 'pathtracer-webgpu';
-import { buildRenderScene } from './lighting.js';
+import { buildRenderScene } from './lighting.js?v=mwytbqcp';
 
 const M = 0.01;
 
